@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PA-Bench Console</title>
+<link rel="stylesheet" href="style.css">
+<script src="vendor/echarts.min.js"></script>
+</head>
+<body>
+<div id="app">
+  <nav id="sidebar">
+    <div class="brand">PA-Bench<br><span id="brand-mode">Console</span></div>
+    <a href="#/overview" data-route="overview">① Overview</a>
+    <a href="#/runs" data-route="runs" id="nav-runs" style="display:none">② Runs</a>
+    <a href="#/run" data-route="run" id="nav-run">② Run results</a>
+    <a href="#/episodes" data-route="episodes">③ Episode browser</a>
+    <a href="#/metrics" data-route="metrics">④ Metric registry</a>
+    <div class="nav-note" id="nav-note">Static mode: data from<br><code>out/</code> benchmark artifacts</div>
+  </nav>
+  <main id="main">
+    <div class="loading">Loading…</div>
+  </main>
+</div>
+<script type="module" src="app.js"></script>
+</body>
+</html>

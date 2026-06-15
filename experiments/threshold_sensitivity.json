@@ -1,0 +1,22 @@
+{
+ "grid": {
+  "track=0.15mm,plan=0.8": 0.8799,
+  "track=0.15mm,plan=1.0": 0.894,
+  "track=0.15mm,plan=1.2": 0.8934,
+  "track=0.2mm,plan=0.8": 0.8799,
+  "track=0.2mm,plan=1.0": 0.894,
+  "track=0.2mm,plan=1.2": 0.8934,
+  "track=0.3mm,plan=0.8": 0.8799,
+  "track=0.3mm,plan=1.0": 0.894,
+  "track=0.3mm,plan=1.2": 0.8934,
+  "track=0.45mm,plan=0.8": 0.8826,
+  "track=0.45mm,plan=1.0": 0.9061,
+  "track=0.45mm,plan=1.2": 0.9302,
+  "track=0.6mm,plan=0.8": 0.8826,
+  "track=0.6mm,plan=1.0": 0.9061,
+  "track=0.6mm,plan=1.2": 0.9302
+ },
+ "min": 0.8799,
+ "max": 0.9302,
+ "default": 0.894
+}

@@ -1,0 +1,29 @@
+<!doctype html><html><head><meta charset="utf-8">
+<title>PA-Bench 报告</title>
+<style>
+body{font-family:-apple-system,sans-serif;margin:2em;max-width:1200px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+td,th{border:1px solid #ccc;padding:6px 8px;text-align:left}
+th{background:#f0f0f0} .big{font-size:18px}
+.meta{color:#666;font-size:12px}
+</style></head><body>
+<h1>PA-Bench 评测报告 — 瓶盖拧紧 (screw_cap, T1)</h1>
+<p class="meta">benchmark_version: pa-bench-0.1.0+slice-m1 ·
+seed: 7 · 总回合数: 112 · 归因规则: attr-rules-0.1</p>
+<h2>① 摘要 (面向非机器人背景读者)</h2>
+<p class='big'>🟢 当前最优组合: <b>precise-vla-0.3</b> @ arm-calibrated-2026Q2, 成功率 82%。绿=可用(≥80%), 黄=有风险(≥50%), 红=不可用。</p>
+<h2>② 模型 × 硬件 对比 (工程层)</h2>
+<table>
+<tr><th></th><th>模型</th><th>硬件档案</th><th>成功率 [95% CI]</th>
+<th>e_plan 裕度比均值<br>(>1=模型规划必败)</th><th>e_track RMS 均值 mm<br>(硬件跟踪)</th>
+<th>抖动频段能量<br>(m/s²)²</th><th>指令 jerk 中位数</th><th>不确定性 AUROC</th>
+<th>MR-1 等变性<br>(中位距离)</th><th>首败阶段分布</th><th>失败归因分布</th></tr>
+<tr><td>🟢</td><td>precise-vla-0.3</td><td>arm-calibrated-2026Q2</td><td>0.82 [0.64,0.92] (n=28)</td><td>0.704</td><td>0.126</td><td>2.9</td><td>7.23e+06</td><td>1</td><td>✅ 通过 (0.6mm)</td><td>insert:5</td><td>model:5</td></tr><tr><td>🔴</td><td>precise-vla-0.3</td><td>arm-worn-2023Q1</td><td>0.36 [0.21,0.54] (n=28)</td><td>0.733</td><td>1.27</td><td>192</td><td>7.23e+06</td><td>0.55</td><td>✅ 通过 (0.4mm)</td><td>insert:18</td><td>hardware:13, model:5</td></tr><tr><td>🔴</td><td>sloppy-vla-0.1</td><td>arm-worn-2023Q1</td><td>0.14 [0.06,0.31] (n=28)</td><td>2.24</td><td>1.36</td><td>190</td><td>8.67e+11</td><td>0.469</td><td>❌ 违反 (1.9mm)</td><td>grasp:1, insert:23</td><td>hardware:10, model:14</td></tr><tr><td>🔴</td><td>sloppy-vla-0.1</td><td>arm-calibrated-2026Q2</td><td>0.07 [0.02,0.23] (n=28)</td><td>2.41</td><td>0.393</td><td>7.89</td><td>8.6e+11</td><td>0.269</td><td>❌ 违反 (3.1mm)</td><td>grasp:2, insert:24</td><td>model:26</td></tr>
+</table>
+<h2>③ 读法 (归因 → 改进动作)</h2>
+<ul>
+<li>归因 <b>model</b> 多 ⇒ 看 e_plan 裕度比与 MR 违反率: 偏置型 ⇒ 手眼标定/视觉微调; 随机型 ⇒ 补训练数据。</li>
+<li>归因 <b>hardware</b> 多 ⇒ 看 e_track RMS 与抖动能量: 安排控制器整定或维保。</li>
+<li>归因 <b>environment</b> ⇒ 扰动出训练分布且 oracle 也失败: 改工位条件或扩采集范围。</li>
+</ul>
+</body></html>

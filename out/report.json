@@ -1,0 +1,118 @@
+{
+  "meta": {
+    "benchmark_version": "pa-bench-0.1.0+slice-m1",
+    "seed": 7,
+    "total_episodes": 112,
+    "attr_rules_version": "attr-rules-0.1"
+  },
+  "results": [
+    {
+      "model_id": "precise-vla-0.3",
+      "hw_config_id": "arm-calibrated-2026Q2",
+      "sr": 0.8214285714285714,
+      "n": 28,
+      "ci95": [
+        0.644082084514089,
+        0.9212161417056989
+      ],
+      "efficiency": 1.0,
+      "plan_margin_mean": 0.7043486384477761,
+      "e_track_rms_mean_mm": 0.12595286346709358,
+      "jitter_band_mean": 2.902047014984283,
+      "jerk_cmd_median": 7234601.785394402,
+      "uncertainty_auroc": 1.0,
+      "latency_p99_ms": 16.67406925510616,
+      "mr1_violated": false,
+      "mr1_median_dist_mm": 0.5654126092061762,
+      "first_failure": {
+        "insert": 5
+      },
+      "attribution_counts": {
+        "model": 5
+      },
+      "oracle_replays_used": 0
+    },
+    {
+      "model_id": "precise-vla-0.3",
+      "hw_config_id": "arm-worn-2023Q1",
+      "sr": 0.35714285714285715,
+      "n": 28,
+      "ci95": [
+        0.20705611972458876,
+        0.5417002241777278
+      ],
+      "efficiency": 1.0,
+      "plan_margin_mean": 0.7333617893601002,
+      "e_track_rms_mean_mm": 1.2735657930899937,
+      "jitter_band_mean": 192.27994256411543,
+      "jerk_cmd_median": 7226786.693289513,
+      "uncertainty_auroc": 0.55,
+      "latency_p99_ms": 16.602315139585368,
+      "mr1_violated": false,
+      "mr1_median_dist_mm": 0.4242819892322324,
+      "first_failure": {
+        "insert": 18
+      },
+      "attribution_counts": {
+        "hardware": 13,
+        "model": 5
+      },
+      "oracle_replays_used": 5
+    },
+    {
+      "model_id": "sloppy-vla-0.1",
+      "hw_config_id": "arm-calibrated-2026Q2",
+      "sr": 0.07142857142857142,
+      "n": 28,
+      "ci95": [
+        0.019811647447770794,
+        0.2264573842591786
+      ],
+      "efficiency": 1.0,
+      "plan_margin_mean": 2.4061261481572696,
+      "e_track_rms_mean_mm": 0.39330749266523696,
+      "jitter_band_mean": 7.892625325760846,
+      "jerk_cmd_median": 859749116858.7101,
+      "uncertainty_auroc": 0.2692307692307692,
+      "latency_p99_ms": 53.15469717772405,
+      "mr1_violated": true,
+      "mr1_median_dist_mm": 3.104709238945922,
+      "first_failure": {
+        "insert": 24,
+        "grasp": 2
+      },
+      "attribution_counts": {
+        "model": 26
+      },
+      "oracle_replays_used": 23
+    },
+    {
+      "model_id": "sloppy-vla-0.1",
+      "hw_config_id": "arm-worn-2023Q1",
+      "sr": 0.14285714285714285,
+      "n": 28,
+      "ci95": [
+        0.056989129307017855,
+        0.31490173044877334
+      ],
+      "efficiency": 1.0,
+      "plan_margin_mean": 2.2420351009180495,
+      "e_track_rms_mean_mm": 1.3593397531610176,
+      "jitter_band_mean": 190.4292288308028,
+      "jerk_cmd_median": 867046421984.4949,
+      "uncertainty_auroc": 0.46875,
+      "latency_p99_ms": 53.1572420384665,
+      "mr1_violated": true,
+      "mr1_median_dist_mm": 1.8618288201532136,
+      "first_failure": {
+        "insert": 23,
+        "grasp": 1
+      },
+      "attribution_counts": {
+        "model": 14,
+        "hardware": 10
+      },
+      "oracle_replays_used": 21
+    }
+  ]
+}
