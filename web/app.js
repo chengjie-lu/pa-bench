@@ -1240,15 +1240,19 @@ detectMode().then(async () => {
   // On failure (offline / no WASM) we silently stay in view-only static mode.
   if (MODE === "static") {
     const note = document.getElementById("nav-note");
-    if (note) note.innerHTML = "Static mode · booting in-browser<br>runtime (Pyodide)…";
-    const ok = await bootPyodideBackend();
-    if (ok) {
+    if (note) note.innerHTML = "Static mode · booting in-browser<br>runtime (Pyodide), ~10–20s…";
+    toast("Loading in-browser runtime (Pyodide), ~10–20s — then you can run evaluations & register metrics", "ok");
+    const res = await bootPyodideBackend();
+    if (res.ok) {
       MODE = "server"; PY_RUNTIME = true; RUN_CTX = null;
       Object.keys(cache).forEach((k) => delete cache[k]);  // drop static web/data caches
       updateNav();
       router();
-    } else if (note) {
-      updateNav();  // restore the plain static note
+      toast("In-browser runtime ready ✓ — open “Runs” to launch an evaluation, or “Metric registry” to add a metric", "ok");
+    } else {
+      if (note) note.innerHTML = `Static mode (view-only).<br>In-browser runtime unavailable:<br>` +
+        `<span style="color:#b3261e">${esc(res.error)}</span>`;
+      toast(`In-browser runtime failed: ${res.error}`, "fail");
     }
   }
 });

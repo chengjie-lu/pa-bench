@@ -80,13 +80,15 @@ function loadSavedCustom() {
 export function bootPyodideBackend() {
   if (bootPromise) return bootPromise;
   bootPromise = (async () => {
-    if (typeof Worker === "undefined" || typeof WebAssembly === "undefined") return false;
+    if (typeof Worker === "undefined" || typeof WebAssembly === "undefined")
+      return { ok: false, error: "this browser has no Web Worker / WebAssembly support" };
     const [manifest, legacyReport, legacyIndex] = await Promise.all([
       loadJSON(`${BASE}py/manifest.json`),
       loadJSON(`${BASE}data/report.json`),
       loadJSON(`${BASE}data/index.json`),
     ]);
-    if (!manifest || !manifest.files) return false;
+    if (!manifest || !manifest.files)
+      return { ok: false, error: "could not load web/py/manifest.json" };
 
     worker = new Worker(new URL("./worker.js", import.meta.url));
     const ready = new Promise((resolve, reject) => {
@@ -99,7 +101,7 @@ export function bootPyodideBackend() {
           if (p) { pending.delete(m.id); p.resolve({ status: m.status, body: m.body }); }
         }
       };
-      worker.onerror = (e) => reject(new Error(e.message || "worker error"));
+      worker.onerror = (e) => reject(new Error(e.message || "worker failed to load"));
     });
     worker.postMessage({
       type: "init", baseUrl: BASE, files: manifest.files,
@@ -107,7 +109,11 @@ export function bootPyodideBackend() {
     });
     await ready;
     installFetchInterceptor();
-    return true;
-  })().catch(() => false);
+    console.log("[pabench] in-browser Pyodide runtime ready");
+    return { ok: true };
+  })().catch((e) => {
+    console.error("[pabench] Pyodide boot failed:", e);
+    return { ok: false, error: String((e && e.message) || e) };
+  });
   return bootPromise;
 }
