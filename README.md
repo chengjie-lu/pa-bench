@@ -3,7 +3,7 @@
 [![Live demo](https://img.shields.io/badge/live%20demo-pa--bench-2f63d8)](https://chengjie-lu.github.io/pa-bench/)
 [![Deploy](https://github.com/chengjie-lu/pa-bench/actions/workflows/deploy-pages.yml/badge.svg)](https://github.com/chengjie-lu/pa-bench/actions/workflows/deploy-pages.yml)
 
-**Live console: https://chengjie-lu.github.io/pa-bench/** (static mode — overview, run results, charts, episode browser, and the per-episode debug player all work in the browser).
+**Live console: https://chengjie-lu.github.io/pa-bench/** — overview, run results, charts, episode browser, and the per-episode debug player work immediately from precomputed data. A few seconds after load it also boots an **in-browser Pyodide runtime** (CPython + numpy in WebAssembly) so you can **launch new evaluations and register custom metrics right on the live link, with no backend** — the brand chip flips to "in-browser (Pyodide)" once ready.
 
 The M1 minimal closed loop (§11 of the requirements doc): an end-to-end evaluation chain for the single task
 **cap fastening (screw_cap, T1)** — scene generation (nominal + mutation + metamorphic MR-1) → simulation
@@ -138,6 +138,11 @@ pa-bench/
   AST-hardened evaluator (no `eval`); R-8 still requires each to bind ≥1 improvement action. Registered metrics persist
   (`custom_metrics.json`), show in the registry, and appear as extra columns in the run-results combo table — computed
   on demand so they apply to existing runs too. API: `GET /api/backends`, `GET /api/metric-fields`, `GET/POST/DELETE /api/custom-metrics`.
+- **In-browser runtime (Pyodide)** ✅: on the static deploy (no backend), a Web Worker loads Pyodide + numpy,
+  imports the pabench sources emitted to `web/py/` by `build_web_data.py`, and serves an in-memory backend
+  (`pabench/browser_api.py`) through a `/api/*` `fetch` interceptor. So the run wizard and custom-metric
+  registration work on the public link exactly as in server mode; runs execute client-side (synchronously, ~1s).
+  Falls back silently to view-only static mode if WebAssembly/CDN is unavailable.
 - **M-FE3 interactive scenes** ⬜: scene-editor mouse/keyboard interaction (drag pose / adjust lighting), oracle-control button, side-by-side comparison of two runs.
 - **M-FE4 customer-facing** ⬜: PDF report export, `/hardware` hardware-trend page, R-9 non-expert user testing.
 - Degradation clauses still apply: the 3D viewport is a 2D top-down canvas (N5); FakeSim does not render, so the debug-page video area is always a placeholder (O-F2).

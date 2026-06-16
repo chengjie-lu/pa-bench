@@ -9,6 +9,10 @@ Output: web/data/
   registry.json          metric registry (FR-5.1)
   index.json             episode index (no large arrays, fe-rq.md N2) + chart pre-aggregations (C1/C2/C3/C5)
   episodes/<id>.json     full per-episode payload (loaded on demand by the debug page, O-F3)
+
+Also emits web/py/ — the pabench Python sources + a manifest — so the Pyodide in-browser
+runtime can run evaluations and compute custom metrics client-side (no backend) on the static
+deploy. The FastAPI platform/ layer is excluded (not importable / not needed in the browser).
 """
 from __future__ import annotations
 
@@ -22,6 +26,28 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from pabench.schema import Episode
 from pabench.webdata import build_index, index_record
 from pabench.metrics.registry import METRIC_REGISTRY
+
+
+def export_py_sources(root: Path, web_dir: Path):
+    """Copy the pabench package sources (minus the FastAPI platform/ layer) + a manifest into
+    web/py/, so the Pyodide worker can load and import them in the browser."""
+    py_dir = web_dir / "py"
+    pkg_dst = py_dir / "pabench"
+    # only clear the generated package copy — keep the hand-written worker.js / pyboot.js
+    shutil.rmtree(pkg_dst, ignore_errors=True)
+    py_dir.mkdir(parents=True, exist_ok=True)
+    pkg_src = root / "pabench"
+    manifest = []
+    for p in sorted(pkg_src.rglob("*.py")):
+        rel = p.relative_to(pkg_src)
+        if rel.parts[0] in ("platform", "__pycache__"):
+            continue  # FastAPI layer not needed/importable in the browser
+        dst = pkg_dst / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(p, dst)
+        manifest.append(f"pabench/{rel.as_posix()}")
+    (py_dir / "manifest.json").write_text(json.dumps({"files": manifest}, indent=1))
+    return manifest
 
 
 def main():
@@ -48,9 +74,11 @@ def main():
 
     (web_data / "index.json").write_text(
         json.dumps(build_index(report, records), ensure_ascii=False))
+    manifest = export_py_sources(root, root / "web")
     print(f"web data ready: {len(records)} episode-index rows + per-episode files → {web_data}")
     print(f"index.json {((web_data/'index.json').stat().st_size/1024):.0f} KB "
           f"(list carries no large arrays, NFR-FE N2)")
+    print(f"web/py ready: {len(manifest)} pabench source files for the Pyodide runtime")
 
 
 if __name__ == "__main__":

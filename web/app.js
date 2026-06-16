@@ -3,8 +3,13 @@
  * Data: probe /api/ping on startup —
  *   server mode: platform API (launch runs + SSE progress, python serve.py)
  *   static mode: web/data/ (build_web_data.py artifacts), no backend, M-FE1 behavior unchanged.
+ *   pyodide mode: no server, but the pabench pipeline runs in-browser (WebAssembly) via a worker,
+ *     surfaced through a /api/* fetch interceptor so the static deploy can launch runs + register metrics.
  */
 "use strict";
+
+import { bootPyodideBackend } from "./py/pyboot.js";
+let PY_RUNTIME = false;  // true once the in-browser Pyodide backend is serving /api/*
 
 const $main = document.getElementById("main");
 const GAP_MM = { T1: 1.0, T2: 0.5, T3: 0.2 };
@@ -1194,11 +1199,14 @@ function watchRun(id, combos, perCombo) {
 
 function updateNav() {
   const server = MODE === "server";
-  document.getElementById("brand-mode").innerHTML =
-    server ? "Console · M-FE2 server mode" : "Console · M-FE1";
   document.getElementById("nav-runs").style.display = server ? "" : "none";
   document.getElementById("nav-run").style.display = server ? "none" : "";
-  document.getElementById("nav-note").innerHTML = server
+  document.getElementById("brand-mode").innerHTML =
+    PY_RUNTIME ? "Console · in-browser (Pyodide)"
+    : server ? "Console · M-FE2 server mode" : "Console · M-FE1";
+  document.getElementById("nav-note").innerHTML = PY_RUNTIME
+    ? "In-browser runtime: pabench runs<br>in your browser via <code>Pyodide</code>"
+    : server
     ? "Server mode: platform API<br><code>/api/*</code> + SSE progress"
     : "Static mode: data from<br><code>out/</code> benchmark artifacts";
 }
@@ -1223,8 +1231,24 @@ window.router = router;
 window.addEventListener("resize", () => { clearTimeout(window.__rs);
   window.__rs = setTimeout(() => charts.forEach((c) => c.resize()), 200); });
 // startup: probe mode (server=M-FE2 / static=M-FE1) before entering the router
-detectMode().then(() => {
+detectMode().then(async () => {
   updateNav();
   window.addEventListener("hashchange", router);
   router();
+  // No real server (static deploy)? Boot the in-browser Pyodide backend in the background.
+  // On success it serves /api/* via a fetch interceptor, so we flip to server-mode UI and re-render.
+  // On failure (offline / no WASM) we silently stay in view-only static mode.
+  if (MODE === "static") {
+    const note = document.getElementById("nav-note");
+    if (note) note.innerHTML = "Static mode · booting in-browser<br>runtime (Pyodide)…";
+    const ok = await bootPyodideBackend();
+    if (ok) {
+      MODE = "server"; PY_RUNTIME = true; RUN_CTX = null;
+      Object.keys(cache).forEach((k) => delete cache[k]);  // drop static web/data caches
+      updateNav();
+      router();
+    } else if (note) {
+      updateNav();  // restore the plain static note
+    }
+  }
 });

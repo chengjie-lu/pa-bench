@@ -1,0 +1,31 @@
+{
+ "files": [
+  "pabench/__init__.py",
+  "pabench/attribution/__init__.py",
+  "pabench/attribution/engine.py",
+  "pabench/browser_api.py",
+  "pabench/metrics/__init__.py",
+  "pabench/metrics/custom.py",
+  "pabench/metrics/l0_outcome.py",
+  "pabench/metrics/l2_process.py",
+  "pabench/metrics/l3_hardware.py",
+  "pabench/metrics/registry.py",
+  "pabench/models/__init__.py",
+  "pabench/models/base.py",
+  "pabench/models/fake.py",
+  "pabench/pipeline.py",
+  "pabench/report/__init__.py",
+  "pabench/report/html_report.py",
+  "pabench/runners/__init__.py",
+  "pabench/runners/agx_sim.py",
+  "pabench/runners/base.py",
+  "pabench/runners/fake_sim.py",
+  "pabench/runners/mujoco_sim.py",
+  "pabench/scenegen/__init__.py",
+  "pabench/scenegen/metamorphic.py",
+  "pabench/scenegen/mutation.py",
+  "pabench/scenegen/nominal.py",
+  "pabench/schema.py",
+  "pabench/webdata.py"
+ ]
+}
