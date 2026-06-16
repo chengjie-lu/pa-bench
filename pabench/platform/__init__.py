@@ -1,7 +1,7 @@
-"""M-FE2 服务化平台层 (fe-rq.md §8/§13, rq.md §9 预留目录)。
+"""M-FE2 service platform layer (fe-rq.md §8/§13, rq.md §9 reserved directory).
 
-注: O-F4 建议的仓库顶层 platform/ 与 Python 标准库 platform 模块同名,
-会遮蔽 stdlib (numpy 等内部 import platform 即炸), 故落在 pabench.platform 子包。
+Note: the repo-top-level platform/ suggested by O-F4 has the same name as Python's stdlib platform module
+and would shadow it (numpy and others do `import platform` internally and would break), so it lives in the pabench.platform subpackage.
 """
 from .run_manager import RunManager
 from .api import create_app

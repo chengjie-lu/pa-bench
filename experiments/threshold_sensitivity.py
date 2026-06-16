@@ -1,6 +1,6 @@
 #!/usr/bin/env python
-"""归因阈值敏感性: 在 e_track 阈值 × plan_margin 阈值网格上重算归因准确率。
-回应评审关切: 阈值是先验设定的 (attr-rules-0.1), 结论是否依赖于精调?"""
+"""Attribution threshold sensitivity: recompute attribution accuracy over an e_track-threshold × plan_margin-threshold grid.
+Addresses the reviewer concern: thresholds are set a priori (attr-rules-0.1) — does the conclusion depend on fine-tuning?"""
 from __future__ import annotations
 
 import json

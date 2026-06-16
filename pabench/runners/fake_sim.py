@@ -1,11 +1,13 @@
-"""【桩 / FAKE 后端】解析运动学假仿真 —— 替代 MuJoCo (本环境未安装)。
+"""[STUB / FAKE backend] analytic-kinematics fake simulation — substitute for MuJoCo (not installed here).
 
-它是 Backend 接口的完整实现, 物理用一阶跟踪滤波 + 系统性漂移 + 正弦抖动 + 白噪声
-近似, 足以产生评测链路需要的全部信号 (指令/实测轨迹分离、力交互、成功判据)。
-接 MuJoCo 时实现 runners/mujoco_sim.MujocoBackend, 上层零改动。
+It is a complete implementation of the Backend interface; physics is approximated with a first-order
+tracking filter + systematic drift + sinusoidal jitter + white noise, which is enough to produce all
+the signals the evaluation pipeline needs (command/actual trajectory separation, force interaction,
+success criterion). When wiring up MuJoCo, implement runners/mujoco_sim.MujocoBackend; the upper layers
+need zero changes.
 
-误差链 (支撑 FR-4.2 e_plan/e_track 分解):
-  最终装配误差 = 模型感知误差(e_plan, 在指令里) + 硬件跟踪误差(e_track, 实测-指令)
+Error chain (supports the FR-4.2 e_plan/e_track decomposition):
+  final assembly error = model perception error (e_plan, in the command) + hardware tracking error (e_track, actual − command)
 """
 from __future__ import annotations
 
@@ -28,9 +30,9 @@ WORN_ARM = HardwareProfile(
     tracking_alpha=0.12, droop_xy=(0.70e-3, -0.40e-3),
     track_noise_std=0.35e-3, jitter_amp=0.45e-3)
 
-DT = 0.01                 # 100 Hz (rq.md §5: 遥测 ≥100 Hz)
-GRASP_TOL_M = 6.0e-3      # 抓取阶段成功判据: 指令抓取点距零件真值 < 6 mm
-FORCE_K = 5000.0          # 插入接触刚度 [N/m] (超公差横向偏差 → 接触力)
+DT = 0.01                 # 100 Hz (rq.md §5: telemetry ≥100 Hz)
+GRASP_TOL_M = 6.0e-3      # grasp-phase success criterion: commanded grasp point < 6 mm from part ground truth
+FORCE_K = 5000.0          # insertion contact stiffness [N/m] (lateral deviation beyond tolerance → contact force)
 
 
 def _phase_spans(dt: float):
@@ -52,16 +54,16 @@ class FakeSimBackend(Backend):
 
     def run_episode(self, scene: Scene, model: VLAModel,
                     hw: HardwareProfile, seed: int) -> Episode:
-        rng_model = np.random.default_rng(seed)             # 模型感知/推理噪声
+        rng_model = np.random.default_rng(seed)             # model perception/inference noise
         obs = Observation(scene=scene,
                           lux_factor=float(scene.perturbation.get("lux_factor", 1.0)),
-                          instruction="从料箱拿起瓶盖, 拧紧到瓶子上",
+                          instruction="pick the cap from the bin and screw it onto the bottle",
                           t_grid=self.t_grid, phase_spans=self.phase_spans)
         chunk = model.infer(obs, rng_model)
         return self._execute(scene, model.model_id, chunk, hw, seed)
 
     def run_oracle(self, scene: Scene, hw: HardwareProfile, seed: int) -> Episode:
-        """FR-2.5: 完美感知 (真值 waypoint) 的 min-jerk 专家轨迹, 同硬件执行。"""
+        """FR-2.5: perfect-perception (ground-truth waypoints) min-jerk expert trajectory, executed on the same hardware."""
         chunk = self._plan_oracle(scene)
         return self._execute(scene, "oracle-replay", chunk, hw, seed)
 
@@ -91,18 +93,18 @@ class FakeSimBackend(Backend):
 
     def _execute(self, scene: Scene, model_id: str, chunk: ActionChunk,
                  hw: HardwareProfile, seed: int) -> Episode:
-        rng_hw = np.random.default_rng(seed + 10_000_019)   # 硬件噪声独立流
+        rng_hw = np.random.default_rng(seed + 10_000_019)   # independent hardware-noise stream
         n = self.n_steps
         cmd = chunk.cmd_xyz
 
-        # 1) 一阶跟踪滤波 (执行迟滞)
+        # 1) first-order tracking filter (execution lag)
         actual = np.zeros_like(cmd)
         state = cmd[0].copy()
         a = hw.tracking_alpha
         for i in range(n):
             state = state + a * (cmd[i] - state)
             actual[i] = state
-        # 2) 系统性漂移 + 抖动 (5–50 Hz 正弦) + 白噪声
+        # 2) systematic drift + jitter (5–50 Hz sinusoids) + white noise
         actual[:, 0] += hw.droop_xy[0]
         actual[:, 1] += hw.droop_xy[1]
         phases = rng_hw.uniform(0, 2 * np.pi, (len(hw.jitter_freqs), 3))
@@ -111,9 +113,9 @@ class FakeSimBackend(Backend):
                 actual[:, ax] += hw.jitter_amp * np.sin(2 * np.pi * f * self.t_grid + phases[k, ax])
         actual += rng_hw.normal(0.0, hw.track_noise_std, actual.shape)
 
-        yaw_actual = chunk.cmd_yaw.copy()  # yaw 跟踪近似理想 (纵切简化)
+        yaw_actual = chunk.cmd_yaw.copy()  # yaw tracking is approximately ideal (vertical-slice simplification)
 
-        # 3) 成功判据 (FR-3.1 可机检函数)
+        # 3) success criterion (FR-3.1 machine-checkable function)
         gap = scene.tolerance_class.gap_m
         part_xy = np.array(scene.part_pose_gt.xyz[:2])
         target_xy = np.array(scene.target_pose_gt.xyz[:2])
@@ -131,7 +133,7 @@ class FakeSimBackend(Backend):
         else:
             success, phase_reached, failure_phase, failure_label = True, Phase.DONE, None, None
 
-        # 4) 接触力 (插入+拧紧段, 横向偏差超公差产生接触力 → FR-3.7)
+        # 4) contact force (insert + fasten phases; lateral deviation beyond tolerance produces contact force → FR-3.7)
         wrench = np.zeros((n, 6))
         for ph in (Phase.INSERT, Phase.FASTEN):
             _, i0, i1 = next(s for s in self.phase_spans if s[0] is ph)
@@ -142,7 +144,7 @@ class FakeSimBackend(Backend):
                 unit = np.where(lat_n[:, None] > 0, lat / np.maximum(lat_n[:, None], 1e-12), 0.0)
             wrench[i0:i1, 0:2] = FORCE_K * over[:, None] * unit
 
-        # 5) 夹爪
+        # 5) gripper
         gripper = np.full(n, 0.04)
         gripper[g1:] = 0.012
 
@@ -157,7 +159,7 @@ class FakeSimBackend(Backend):
             episode_id=f"{scene.scene_id}__{model_id}__{hw.hw_config_id}__s{seed}",
             benchmark_version=BENCHMARK_VERSION, source=Source.SIM, scene=scene,
             model=ModelTrace(model_id=model_id,
-                             language_instruction="从料箱拿起瓶盖, 拧紧到瓶子上",
+                             language_instruction="pick the cap from the bin and screw it onto the bottle",
                              chunk=chunk),
             robot=robot, outcome=outcome,
             media={"video_uris": [], "sim_state_log_uri": None},

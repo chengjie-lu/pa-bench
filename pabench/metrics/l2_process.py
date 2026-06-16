@@ -1,4 +1,4 @@
-"""L2 过程质量层指标 (FR-3.5–3.10) —— 真实现, 全部从 Episode 原始遥测计算 (NFR-6)。"""
+"""L2 process-quality metrics (FR-3.5–3.10) — real implementation, all computed from raw Episode telemetry (NFR-6)."""
 from __future__ import annotations
 
 import numpy as np
@@ -6,23 +6,23 @@ import numpy as np
 from ..schema import Episode, Phase
 
 
-# ---------------------------------------------------------------- FR-3.5 对准残差
+# ---------------------------------------------------------------- FR-3.5 alignment residual
 
 
 def plan_margin_ratio(ep: Episode) -> float:
-    """e_plan 裕度比: 插入前最后时刻【指令】位置相对目标真值的横向偏差 / 公差。
-    >1 ⇒ 模型规划已注定失败 (物理上不可能成功)。"""
+    """e_plan margin ratio: lateral deviation of the [commanded] position at the last pre-insertion step vs target ground truth / tolerance.
+    >1 ⇒ the model's plan is already doomed to fail (physically impossible to succeed)."""
     _, _, ins_end = next(s for s in ep.robot.phase_spans if s[0] is Phase.INSERT)
     cmd_xy = ep.model.chunk.cmd_xyz[ins_end - 1, :2]
     target_xy = np.array(ep.scene.target_pose_gt.xyz[:2])
     return float(np.linalg.norm(cmd_xy - target_xy) / ep.scene.tolerance_class.gap_m)
 
 
-# ---------------------------------------------------------------- FR-3.6 轨迹平滑度
+# ---------------------------------------------------------------- FR-3.6 trajectory smoothness
 
 
 def dimensionless_jerk(t: np.ndarray, pos: np.ndarray) -> float:
-    """无量纲 jerk 积分: (T^5 / L^2) * ∫|x'''|^2 dt。值越大越不平滑。"""
+    """Dimensionless jerk integral: (T^5 / L^2) * ∫|x'''|^2 dt. Larger = less smooth."""
     dt = float(t[1] - t[0])
     j = np.diff(pos, n=3, axis=0) / dt**3
     integral = float(np.sum(j * j) * dt)
@@ -34,26 +34,26 @@ def dimensionless_jerk(t: np.ndarray, pos: np.ndarray) -> float:
 
 
 def jerk_cmd(ep: Episode) -> float:
-    """对指令轨迹计算 → 归模型。"""
+    """Computed on the command trajectory → attributed to the model."""
     return dimensionless_jerk(ep.model.chunk.t, ep.model.chunk.cmd_xyz)
 
 
 def jerk_actual(ep: Episode) -> float:
-    """对实测轨迹计算 → 归整链路; 与 jerk_cmd 的差参与归因。"""
+    """Computed on the actual trajectory → attributed to the whole chain; its difference from jerk_cmd feeds attribution."""
     return dimensionless_jerk(ep.robot.t, ep.robot.ee_xyz_actual)
 
 
-# ---------------------------------------------------------------- FR-3.7 力交互质量
+# ---------------------------------------------------------------- FR-3.7 force-interaction quality
 
 
 def force_exceed_count(ep: Episode, f_max_n: float = 3.0) -> int:
     f = np.linalg.norm(ep.robot.ft_wrench[:, :3], axis=1)
     above = f > f_max_n
-    # 计"次数": 上升沿个数
+    # count "occurrences": number of rising edges
     return int(np.sum(above[1:] & ~above[:-1]) + (1 if above[0] else 0))
 
 
-# ---------------------------------------------------------------- FR-3.8 不确定性
+# ---------------------------------------------------------------- FR-3.8 uncertainty
 
 
 def peak_uncertainty(ep: Episode) -> float | None:
@@ -62,7 +62,7 @@ def peak_uncertainty(ep: Episode) -> float | None:
 
 
 def auroc(scores, labels) -> float | None:
-    """Mann-Whitney AUROC (带并列秩平均), 无第三方依赖。labels=True 为正类(失败)。"""
+    """Mann-Whitney AUROC (with tie-averaged ranks), no third-party dependency. labels=True is the positive class (failure)."""
     scores = np.asarray(scores, float)
     labels = np.asarray(labels, bool)
     n1, n0 = int(labels.sum()), int((~labels).sum())
@@ -84,7 +84,7 @@ def auroc(scores, labels) -> float | None:
 
 
 def uncertainty_failure_auroc(episodes: list[Episode]) -> float | None:
-    """峰值不确定性对失败的预警能力 (FR-3.8a)。模型不输出不确定性时返回 None (N/A)。"""
+    """How well peak uncertainty predicts failure (FR-3.8a). Returns None (N/A) when the model emits no uncertainty."""
     pairs = [(peak_uncertainty(e), not e.outcome.success) for e in episodes]
     pairs = [(s, y) for s, y in pairs if s is not None]
     if not pairs:
@@ -92,7 +92,7 @@ def uncertainty_failure_auroc(episodes: list[Episode]) -> float | None:
     return auroc([s for s, _ in pairs], [y for _, y in pairs])
 
 
-# ---------------------------------------------------------------- FR-3.10 推理时延
+# ---------------------------------------------------------------- FR-3.10 inference latency
 
 
 def latency_percentiles(ep: Episode) -> dict:

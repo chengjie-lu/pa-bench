@@ -1,8 +1,8 @@
-"""核心数据契约 (rq.md §5) —— 全部为真实现, 是所有模块的单一契约。
+"""Core data contract (rq.md §5) — all real implementation, the single contract for every module.
 
-纵切简化(向前兼容, 不影响字段布局):
-- SE3Pose 的旋转只保留绕世界 z 轴的 yaw; 完整 SO(3) 留作扩展。
-- robot 遥测的 schema 用定长数组列代替逐条 ActionStep 对象, 语义与 rq.md 一致。
+Vertical-slice simplifications (forward-compatible, no impact on field layout):
+- SE3Pose rotation keeps only the yaw about the world z axis; full SO(3) is left for extension.
+- The robot-telemetry schema uses fixed-length array columns instead of per-step ActionStep objects, with semantics matching rq.md.
 """
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ class ToleranceClass(str, Enum):
 
     @property
     def gap_m(self) -> float:
-        """装配配合间隙 (rq.md §2.4)。"""
+        """Assembly fit clearance (rq.md §2.4)."""
         return {"T1": 1.0e-3, "T2": 0.5e-3, "T3": 0.2e-3}[self.value]
 
 
@@ -76,7 +76,7 @@ class Attribution(str, Enum):
 @dataclass(frozen=True)
 class SE3Pose:
     xyz: tuple  # (x, y, z) [m]
-    yaw: float  # [rad], 绕世界 z 轴
+    yaw: float  # [rad], about the world z axis
 
     def rotated_z(self, theta: float, about=(0.0, 0.0)) -> "SE3Pose":
         c, s = math.cos(theta), math.sin(theta)
@@ -152,11 +152,11 @@ def _arr_dict(a):
 
 @dataclass
 class ActionChunk:
-    """模型输出的动作块 (rq.md FR-2.4): 指令轨迹 + 可选不确定性 + 推理时延。"""
+    """Action chunk emitted by the model (rq.md FR-2.4): command trajectory + optional uncertainty + inference latency."""
     t: np.ndarray            # (N,) [s]
     cmd_xyz: np.ndarray      # (N,3) [m]
     cmd_yaw: np.ndarray      # (N,) [rad]
-    entropy: Optional[np.ndarray]  # (N,) 可选 — 缺失时相关指标记 N/A (FR-2.4)
+    entropy: Optional[np.ndarray]  # (N,) optional — when absent, related metrics record N/A (FR-2.4)
     latency_ms: np.ndarray   # (N,)
 
     def to_dict(self):
@@ -197,14 +197,14 @@ class ModelTrace:
 
 @dataclass
 class RobotTrace:
-    """硬件遥测 (rq.md §5 robot), 100 Hz 统一时间网格 (FR-2.3: 指令与遥测同网格 → 对齐误差 0)。"""
+    """Hardware telemetry (rq.md §5 robot), 100 Hz uniform time grid (FR-2.3: command and telemetry share the grid → zero alignment error)."""
     t: np.ndarray              # (N,)
-    ee_xyz_actual: np.ndarray  # (N,3) 实测末端位置
+    ee_xyz_actual: np.ndarray  # (N,3) measured end-effector position
     ee_yaw_actual: np.ndarray  # (N,)
-    ft_wrench: np.ndarray      # (N,6) [Fx,Fy,Fz,Tx,Ty,Tz] — 本纵切只填 Fx,Fy
+    ft_wrench: np.ndarray      # (N,6) [Fx,Fy,Fz,Tx,Ty,Tz] — this slice fills only Fx,Fy
     gripper_width: np.ndarray  # (N,)
     hw_config_id: str
-    phase_spans: list = field(default_factory=list)  # [(Phase, i0, i1)] 含端规则切分结果 (FR-3.4)
+    phase_spans: list = field(default_factory=list)  # [(Phase, i0, i1)] rule-based segmentation result (FR-3.4)
 
     def to_dict(self):
         return {
@@ -244,7 +244,7 @@ class Outcome:
     failure_label: Optional[str]
     attribution: Optional[Attribution]
     duration_s: float
-    attribution_reason: Optional[str] = None  # 纵切附加: 归因决策树命中的规则
+    attribution_reason: Optional[str] = None  # slice addition: the attribution decision-tree rule that fired
 
     def to_dict(self):
         return {
@@ -277,7 +277,7 @@ class Episode:
     model: ModelTrace
     robot: RobotTrace
     outcome: Outcome
-    media: dict = field(default_factory=dict)  # video_uris / sim_state_log_uri — 真机/渲染接入点
+    media: dict = field(default_factory=dict)  # video_uris / sim_state_log_uri — real-robot/render hookup point
 
     def to_dict(self):
         return {
@@ -301,12 +301,12 @@ class Episode:
         )
 
     def content_hash(self) -> str:
-        """NFR-1: 同 benchmark_version+seed 重放 → 哈希一致。"""
+        """NFR-1: replaying with the same benchmark_version+seed → identical hash."""
         payload = json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))
         return hashlib.sha256(payload.encode()).hexdigest()
 
 
-# ---------------------------------------------------------------- store (FR-1.6 谱系机检)
+# ---------------------------------------------------------------- store (FR-1.6 lineage machine-check)
 
 
 class LineageError(ValueError):
@@ -314,8 +314,8 @@ class LineageError(ValueError):
 
 
 class EpisodeStore:
-    """写入即校验谱系 (FR-1.6): 非 nominal 回合必须带 parent_episode_id;
-    metamorphic 回合还必须带 mr_id。"""
+    """Validate lineage on write (FR-1.6): non-nominal episodes must carry parent_episode_id;
+    metamorphic episodes must also carry mr_id."""
 
     def __init__(self):
         self.episodes: list[Episode] = []
@@ -323,9 +323,9 @@ class EpisodeStore:
     def add(self, ep: Episode):
         gm = ep.scene.generation_method
         if gm is not GenerationMethod.NOMINAL and not ep.scene.parent_episode_id:
-            raise LineageError(f"{ep.episode_id}: generation_method={gm.value} 但缺 parent_episode_id")
+            raise LineageError(f"{ep.episode_id}: generation_method={gm.value} but missing parent_episode_id")
         if gm is GenerationMethod.METAMORPHIC and not ep.scene.mr_id:
-            raise LineageError(f"{ep.episode_id}: metamorphic 回合缺 mr_id")
+            raise LineageError(f"{ep.episode_id}: metamorphic episode missing mr_id")
         self.episodes.append(ep)
 
     def save_jsonl(self, path):

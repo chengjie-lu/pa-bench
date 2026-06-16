@@ -1,7 +1,7 @@
 #!/usr/bin/env python
-"""跨后端排序一致性实验 (rq.md G4 思路的可执行替代):
-8 个 (模型变体 × 硬件) 条件在 解析后端 vs MuJoCo 物理后端 上的 SR 排序 Spearman ρ。
-需在 arm64 Python (mujoco 可用) 下运行。
+"""Cross-backend ranking-consistency experiment (an executable substitute for the rq.md G4 idea):
+Spearman ρ of the SR ranking of 8 (model variant × hardware) conditions on the analytic backend vs the MuJoCo physics backend.
+Must run under an arm64 Python (where mujoco is available).
 """
 from __future__ import annotations
 
@@ -57,7 +57,7 @@ def run_all(backend):
 
 
 def spearman_exact(a, b):
-    """Spearman ρ + 精确置换 p 值 (n=8 → 40320 个置换)。"""
+    """Spearman ρ + exact permutation p-value (n=8 → 40320 permutations)."""
     def ranks(x):
         order = np.argsort(x)
         r = np.empty(len(x)); r[order] = np.arange(1, len(x) + 1)
@@ -73,9 +73,9 @@ def spearman_exact(a, b):
 
 
 t0 = time.time()
-print("== 解析后端 ==", flush=True)
+print("== analytic backend ==", flush=True)
 fake = run_all(FakeSimBackend())
-print("== MuJoCo 后端 ==", flush=True)
+print("== MuJoCo backend ==", flush=True)
 mj = run_all(MujocoBackend())
 
 keys = list(fake)

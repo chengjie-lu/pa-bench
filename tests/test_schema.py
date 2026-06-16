@@ -1,4 +1,4 @@
-"""Episode 契约: 序列化往返、哈希、谱系机检 (FR-1.6 / NFR-1)。"""
+"""Episode contract: serialization round-trip, hashing, lineage machine-check (FR-1.6 / NFR-1)."""
 import pytest
 
 from pabench.schema import Episode, EpisodeStore, GenerationMethod, LineageError, Scene, SE3Pose, TaskType, ToleranceClass
@@ -18,7 +18,7 @@ def test_tolerance_gap_values():
 
 
 def test_store_rejects_orphan_mutation(precise_calibrated):
-    """FR-1.6: 非 nominal 回合缺 parent_episode_id 应写入即拒。"""
+    """FR-1.6: a non-nominal episode missing parent_episode_id must be rejected on write."""
     ep = Episode.from_dict(precise_calibrated[0].to_dict())
     ep.scene.generation_method = GenerationMethod.MUTATION
     ep.scene.parent_episode_id = None

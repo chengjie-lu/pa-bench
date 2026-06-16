@@ -25,7 +25,7 @@ h2 { font-size: 15px; margin: 22px 0 10px; }
             background-size: 200% 100%; animation: sk 1.2s infinite; border-radius: 6px; }
 @keyframes sk { from { background-position: 200% 0; } to { background-position: -200% 0; } }
 
-/* 总览卡片 */
+/* overview cards */
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px,1fr)); gap: 14px; }
 .card { background: #fff; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08);
         cursor: pointer; border-top: 4px solid #ccc; }
@@ -41,7 +41,7 @@ h2 { font-size: 15px; margin: 22px 0 10px; }
 .weak-list li { margin: 6px 0; cursor: pointer; }
 .weak-list li:hover { text-decoration: underline; }
 
-/* 表格 */
+/* tables */
 table.grid { border-collapse: collapse; width: 100%; background: #fff; font-size: 13px; }
 table.grid th, table.grid td { border: 1px solid #e3e6ea; padding: 6px 9px; text-align: left; }
 table.grid th { background: #eef1f5; cursor: pointer; user-select: none; white-space: nowrap; }
@@ -56,21 +56,21 @@ table.grid tr.clickable:hover { background: #f0f5ff; }
 .badge.attr-ambiguous { background: #eee; color: #666; }
 .badge.gen { background: #f0e9ff; color: #5b3fa6; }
 
-/* 筛选 */
+/* filters */
 .filters { display: flex; flex-wrap: wrap; gap: 10px; background: #fff; padding: 12px;
            border-radius: 8px; margin-bottom: 12px; align-items: flex-end; }
 .filters label { display: flex; flex-direction: column; font-size: 11px; color: #666; gap: 3px; }
 .filters select, .filters input { padding: 4px 6px; font-size: 13px; border: 1px solid #ccc; border-radius: 4px; }
 .filters .count { margin-left: auto; color: #555; font-size: 13px; }
 
-/* 图表 */
+/* charts */
 .chart-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .chart-box { background: #fff; border-radius: 10px; padding: 10px 12px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
 .chart-box h3 { font-size: 13px; margin: 2px 0 4px; color: #444; }
 .chart-box .hint { font-size: 11px; color: #999; }
 .chart { width: 100%; height: 300px; }
 
-/* 调试页 */
+/* debug page */
 .conclusion { background: #fff; border-radius: 10px; padding: 12px 16px; margin-bottom: 12px;
               display: flex; gap: 18px; flex-wrap: wrap; align-items: center;
               box-shadow: 0 1px 3px rgba(0,0,0,.08); }
@@ -91,8 +91,8 @@ canvas.traj { width: 100%; display: block; background: #fafbfd; border-radius: 6
 .na-panel { color:#999; font-size:12px; text-align:center; padding:8px 0; background:#fafafa; border-radius:6px; }
 a.plain { color: #2f63d8; text-decoration: none; }
 button.linkish { background:none; border:none; color:#2f63d8; cursor:pointer; padding:0; font-size:13px; }
-/* ===== M-FE2 服务模式 ===== */
-/* 状态徽标 / 警示 */
+/* ===== M-FE2 server mode ===== */
+/* status badges / alerts */
 .badge.st-running { background: #e4ecff; color: #2c4fae; animation: pulse 1.2s infinite; }
 @keyframes pulse { 50% { opacity: .55; } }
 .badge.warn { background: #fff1d6; color: #8a6100; }
@@ -107,7 +107,7 @@ button.linkish { background:none; border:none; color:#2f63d8; cursor:pointer; pa
 .toast.fail { background: #b3261e; }
 .toast button { background: none; border: none; color: #fff; cursor: pointer; font-size: 14px; }
 
-/* 新建运行向导 (§4.2): 左步骤导航 + 主区 + 右摘要栏 */
+/* new-run wizard (§4.2): left step nav + main area + right summary column */
 .wizard { display: grid; grid-template-columns: 150px 1fr 260px; gap: 14px; align-items: start; }
 .wiz-nav { display: flex; flex-direction: column; gap: 6px; }
 .wiz-nav .step { background: #fff; border-radius: 8px; padding: 10px 12px; cursor: pointer;
@@ -149,7 +149,7 @@ label.param .val { width: 56px; font-variant-numeric: tabular-nums; }
               padding: 10px 22px; font-size: 15px; cursor: pointer; }
 #btn-launch:disabled { background: #aab6cc; cursor: not-allowed; }
 
-/* 运行进度区 (§4.3) */
+/* run progress area (§4.3) */
 .progress-wrap { background: #fff; border-radius: 10px; padding: 14px 18px;
                  box-shadow: 0 1px 3px rgba(0,0,0,.08); }
 .pg-label { display: flex; justify-content: space-between; font-size: 13px; margin: 8px 0 4px; }

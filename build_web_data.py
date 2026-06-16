@@ -1,14 +1,14 @@
 #!/usr/bin/env python
-"""M-FE1 静态适配层 (fe-rq.md §13): 把 out/ 产物预拆分/预聚合成前端可直接 fetch 的静态数据。
+"""M-FE1 static-adaptation layer (fe-rq.md §13): pre-split/pre-aggregate out/ artifacts into static data the frontend can fetch directly.
 
-构建逻辑在 pabench/webdata.py (M-FE2 起与 platform API 共用)。
+The build logic lives in pabench/webdata.py (from M-FE2 on, shared with the platform API).
 
-输入: out/report.json + out/episodes.jsonl
-输出: web/data/
-  report.json            运行级聚合 (原样)
-  registry.json          指标注册表 (FR-5.1)
-  index.json             回合索引(无大数组, fe-rq.md N2) + 图表预聚合(C1/C2/C3/C5)
-  episodes/<id>.json     单回合全量 (调试页按需加载, O-F3)
+Input: out/report.json + out/episodes.jsonl
+Output: web/data/
+  report.json            run-level aggregation (as-is)
+  registry.json          metric registry (FR-5.1)
+  index.json             episode index (no large arrays, fe-rq.md N2) + chart pre-aggregations (C1/C2/C3/C5)
+  episodes/<id>.json     full per-episode payload (loaded on demand by the debug page, O-F3)
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ def main():
     root = Path(__file__).resolve().parent
     out_dir, web_data = root / "out", root / "web" / "data"
     if not (out_dir / "episodes.jsonl").exists():
-        sys.exit("缺 out/episodes.jsonl — 先运行: python demo.py")
+        sys.exit("missing out/episodes.jsonl — run first: python demo.py")
     ep_dir = web_data / "episodes"
     shutil.rmtree(web_data, ignore_errors=True)
     ep_dir.mkdir(parents=True)
@@ -48,9 +48,9 @@ def main():
 
     (web_data / "index.json").write_text(
         json.dumps(build_index(report, records), ensure_ascii=False))
-    print(f"web 数据就绪: {len(records)} 回合索引 + 单回合文件 → {web_data}")
+    print(f"web data ready: {len(records)} episode-index rows + per-episode files → {web_data}")
     print(f"index.json {((web_data/'index.json').stat().st_size/1024):.0f} KB "
-          f"(列表不含大数组, NFR-FE N2)")
+          f"(list carries no large arrays, NFR-FE N2)")
 
 
 if __name__ == "__main__":

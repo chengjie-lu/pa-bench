@@ -1,25 +1,27 @@
-"""AGX Dynamics 物理后端 —— Backend 接口的真实现 (rq.md O-1, NFR-5 即插即用)。
+"""AGX Dynamics physics backend — a real implementation of the Backend interface (rq.md O-1, NFR-5 plug-and-play).
 
-为什么再加一个物理后端:
-- MuJoCo 偏研究/快速原型; AGX Dynamics (Algoryx) 是工业级、商用许可的物理引擎,
-  在约束求解 (直接求解器, 非弹簧近似)、接触保真、与数字孪生工具链对接上更贴近
-  真实产线 —— 精密装配评测的高保真档位。
-- 三后端 (Fake / MuJoCo / AGX) 实现同一 `Backend` 接口 → 上层 pipeline / API / 报告
-  零改动即可切换 (见 RunConfig.backend, BACKEND_REGISTRY)。
+Why add another physics backend:
+- MuJoCo leans toward research / rapid prototyping; AGX Dynamics (Algoryx) is an industrial,
+  commercially licensed physics engine that is closer to a real production line in constraint
+  solving (a direct solver, not a spring approximation), contact fidelity, and integration with
+  digital-twin toolchains — the high-fidelity tier for precision-assembly evaluation.
+- All three backends (Fake / MuJoCo / AGX) implement the same `Backend` interface, so the upper
+  pipeline / API / report can switch between them with zero changes (see RunConfig.backend, BACKEND_REGISTRY).
 
-物理建模 (与 MuJoCo 后端同口径, 保证跨后端排序可比 —— crossbackend_eval 思路):
-- 末端执行器 = 笛卡尔龙门 (gantry): world →[prismatic X]→ bx →[prismatic Y]→ by
-  →[prismatic Z]→ bz →[hinge yaw]→ tool, 共 4-DOF, 与 MuJoCo 的 slide×3+hinge 对应。
-- 位置伺服 = 每个约束的 LockController, 柔度 compliance=1/kp, 阻尼=kv;
-  AGX 直接求解器产生的跟踪迟滞/超调是真实约束动力学, 不是解析滤波。
-- 硬件档案 (HardwareProfile.hw_config_id) → 伺服刚度/阻尼 + 注入扰动力
-  (恒力=漂移 droop, 正弦力=抖动 jitter, 高斯力=噪声), 力施加在 tool 体的 xy。
-- 抓取/拧紧的接触动力学不在本版范围 (成功判据、wrench、夹爪与 FakeSim/MuJoCo 同口径),
-  接触级保真 (AGX 的强项) 列入 future work。
+Physics modeling (same conventions as the MuJoCo backend, to keep cross-backend ranking comparable —
+the crossbackend_eval idea):
+- End-effector = a Cartesian gantry: world →[prismatic X]→ bx →[prismatic Y]→ by
+  →[prismatic Z]→ bz →[hinge yaw]→ tool, 4-DOF total, matching MuJoCo's slide×3 + hinge.
+- Position servo = a LockController on each constraint, compliance = 1/kp, damping = kv;
+  the tracking lag/overshoot produced by the AGX direct solver is real constraint dynamics, not an analytic filter.
+- Hardware profile (HardwareProfile.hw_config_id) → servo stiffness/damping + injected disturbance forces
+  (constant force = drift/droop, sinusoidal force = jitter, Gaussian force = noise), applied on the tool body's xy.
+- Contact dynamics of grasping/fastening are out of scope here (success criterion, wrench, gripper match
+  FakeSim/MuJoCo); contact-level fidelity (AGX's strength) is future work.
 
-import / 许可不可用时优雅降级: AGX_AVAILABLE=False, 实例化给出明确指引。
-AGX 是商用许可产品 (需 license server / 离线许可文件), CI 与本机通常缺失 →
-对应测试 pytest.mark.skipif 跳过, 与 MuJoCo 后端处理一致。
+On import/license unavailability it degrades gracefully: AGX_AVAILABLE=False, instantiation gives clear guidance.
+AGX is a commercially licensed product (needs a license server / offline license file); CI and local machines
+usually lack it → the corresponding tests pytest.mark.skipif skip, consistent with the MuJoCo backend.
 """
 from __future__ import annotations
 
@@ -41,9 +43,9 @@ except ImportError:
 
 _HOME = np.array([0.30, 0.0, 0.30])
 
-# 硬件标定档案 → AGX 伺服/扰动参数。
-# kp [N/m] 越大越刚 (compliance=1/kp); kv [N·s/m] 关节阻尼; droop/jitter/noise 单位 N。
-# 数值与 runners/mujoco_sim.MJ_PROFILES 对齐, 使两物理后端的 SR 排序可直接比对。
+# Hardware calibration profile → AGX servo/disturbance params.
+# kp [N/m] higher = stiffer (compliance=1/kp); kv [N·s/m] joint damping; droop/jitter/noise units N.
+# Values are aligned with runners/mujoco_sim.MJ_PROFILES so the two physics backends' SR rankings compare directly.
 AGX_PROFILES = {
     "arm-calibrated-2026Q2": dict(kp=2000.0, kv=80.0, droop=(0.10, -0.06),
                                   jitter_f=0.30, noise_f=0.15),
@@ -53,18 +55,18 @@ AGX_PROFILES = {
                          jitter_f=0.12, noise_f=0.08),
 }
 JITTER_FREQS = (12.0, 27.0)
-PHYS_DT = 0.002  # 物理步长; 100 Hz 控制 → 每控制步 5 个物理子步 (与 MuJoCo 同)
+PHYS_DT = 0.002  # physics step; 100 Hz control → 5 physics substeps per control step (same as MuJoCo)
 
 
 class AgxBackend(Backend):
     def __init__(self, dt: float = DT):
         if not AGX_AVAILABLE:
             raise RuntimeError(
-                "agx (AGX Dynamics) 未安装或许可不可用。\n"
-                "  安装: 见 Algoryx AGX Dynamics 发行版的 Python 绑定 (agxpy);\n"
-                "  许可: 设置 AGX_LICENSE / 许可文件后导入 `agx` 应成功;\n"
-                "  当前环境请用 FakeSimBackend 或 MujocoBackend (接口相同)。")
-        # AGX 全局运行时只需初始化一次 (idempotent)。
+                "agx (AGX Dynamics) is not installed or its license is unavailable.\n"
+                "  Install: see the Python bindings (agxpy) in the Algoryx AGX Dynamics distribution;\n"
+                "  License: after setting AGX_LICENSE / a license file, importing `agx` should succeed;\n"
+                "  In the current environment use FakeSimBackend or MujocoBackend (same interface).")
+        # The AGX global runtime only needs to be initialized once (idempotent).
         if not agx.isInitialized():
             agx.init()
         self.dt = dt
@@ -79,26 +81,26 @@ class AgxBackend(Backend):
         rng_model = np.random.default_rng(seed)
         obs = Observation(scene=scene,
                           lux_factor=float(scene.perturbation.get("lux_factor", 1.0)),
-                          instruction="从料箱拿起瓶盖, 拧紧到瓶子上",
+                          instruction="pick the cap from the bin and screw it onto the bottle",
                           t_grid=self.t_grid, phase_spans=self.phase_spans)
         chunk = model.infer(obs, rng_model)
         return self._execute(scene, model.model_id, chunk, hw, seed)
 
     def run_oracle(self, scene: Scene, hw: HardwareProfile, seed: int) -> Episode:
         from .fake_sim import FakeSimBackend
-        chunk = FakeSimBackend(self.dt)._plan_oracle(scene)  # 同一专家轨迹规划器
+        chunk = FakeSimBackend(self.dt)._plan_oracle(scene)  # same expert trajectory planner
         return self._execute(scene, "oracle-replay", chunk, hw, seed)
 
     # ------------------------------------------------------------ internals
 
     def _build_world(self, prof: dict):
-        """构建 4-DOF 龙门 + 伺服, 返回 (sim, tool_body, [lock_x, lock_y, lock_z, lock_yaw])。
+        """Build the 4-DOF gantry + servos; return (sim, tool_body, [lock_x, lock_y, lock_z, lock_yaw]).
 
-        每次回合新建独立 Simulation, 保证确定性 (无跨回合状态泄漏)。
+        A fresh independent Simulation is built per episode to guarantee determinism (no cross-episode state leak).
         """
         sim = agxSDK.Simulation()
         sim.setTimeStep(PHYS_DT)
-        sim.setUniformGravity(agx.Vec3(0.0, 0.0, 0.0))  # 与 MuJoCo gravity=0 同, 隔离重力影响
+        sim.setUniformGravity(agx.Vec3(0.0, 0.0, 0.0))  # same as MuJoCo gravity=0, to isolate gravity effects
 
         def _slider(mass: float, pos: np.ndarray) -> "agx.RigidBody":
             rb = agx.RigidBody()
@@ -108,7 +110,7 @@ class AgxBackend(Backend):
             sim.add(rb)
             return rb
 
-        # 龙门链: 各级承载下游, 末级 tool 质量 1 kg (与 MuJoCo 工具体一致)。
+        # Gantry chain: each stage carries the downstream ones; the final tool has mass 1 kg (matching the MuJoCo tool body).
         bx = _slider(1.0, _HOME)
         by = _slider(1.0, _HOME)
         bz = _slider(1.0, _HOME)
@@ -118,14 +120,14 @@ class AgxBackend(Backend):
         compliance = 1.0 / kp
 
         def _prismatic(axis, rb1, rb2):
-            # rb1 沿世界 axis 相对 rb2 平移; rb2=None → 相对世界。
+            # rb1 translates along world axis relative to rb2; rb2=None → relative to the world.
             pris = agx.Prismatic(agx.Vec3(*axis), rb1, rb2) if rb2 is not None \
                 else agx.Prismatic(agx.Vec3(*axis), rb1)
             pris.getMotor1D().setEnable(False)
             lock = pris.getLock1D()
             lock.setEnable(True)
-            lock.setCompliance(compliance)   # 柔度=1/kp → 刚度 kp
-            lock.setDamping(kv * PHYS_DT)     # AGX 阻尼以 (阻尼系数·dt) 计
+            lock.setCompliance(compliance)   # compliance = 1/kp → stiffness kp
+            lock.setDamping(kv * PHYS_DT)     # AGX damping is measured as (damping coefficient · dt)
             sim.add(pris)
             return lock
 
@@ -133,12 +135,12 @@ class AgxBackend(Backend):
         lock_y = _prismatic((0, 1, 0), by, bx)
         lock_z = _prismatic((0, 0, 1), bz, by)
 
-        # yaw: tool 绕世界 Z 相对 bz 旋转
+        # yaw: tool rotates about world Z relative to bz
         hinge = agx.Hinge(agx.Vec3(0, 0, 1), tool, bz)
         hinge.getMotor1D().setEnable(False)
         lock_yaw = hinge.getLock1D()
         lock_yaw.setEnable(True)
-        lock_yaw.setCompliance(1.0 / 50.0)   # yaw 伺服刚度 (与 MuJoCo kp=50 对齐)
+        lock_yaw.setCompliance(1.0 / 50.0)   # yaw servo stiffness (aligned with MuJoCo kp=50)
         lock_yaw.setDamping(2.0 * PHYS_DT)
         sim.add(hinge)
 
@@ -156,13 +158,13 @@ class AgxBackend(Backend):
         droop = np.array(prof["droop"])
 
         for i in range(n):
-            # 位置伺服目标 (关节系 = 相对 HOME 的位移)
+            # position-servo target (joint frame = displacement relative to HOME)
             tgt = cmd[i] - _HOME
             lx.setPosition(float(tgt[0]))
             ly.setPosition(float(tgt[1]))
             lz.setPosition(float(tgt[2]))
             lyaw.setPosition(float(chunk.cmd_yaw[i]))
-            # 扰动力: 漂移 + 抖动 + 噪声 (作用于 tool 体 xy)
+            # disturbance force: drift + jitter + noise (applied to the tool body xy)
             f = droop.copy()
             for k, fr in enumerate(JITTER_FREQS):
                 f += prof["jitter_f"] * np.sin(2 * np.pi * fr * self.t_grid[i] + phases[k])
@@ -172,13 +174,13 @@ class AgxBackend(Backend):
                 sim.stepForward()
             p = tool.getPosition()
             actual[i] = (p.x(), p.y(), p.z())
-            # tool 绕 Z 的旋转角 (四元数 → yaw)
+            # tool rotation about Z (quaternion → yaw)
             rot = tool.getRotation()
             yaw_actual[i] = float(np.arctan2(
                 2.0 * (rot.w() * rot.z() + rot.x() * rot.y()),
                 1.0 - 2.0 * (rot.y() ** 2 + rot.z() ** 2)))
 
-        # 成功判据与 wrench/夹爪 —— 与 FakeSim / MuJoCo 同口径 (跨后端可比)
+        # success criterion and wrench/gripper — same as FakeSim / MuJoCo (cross-backend comparable)
         gap = scene.tolerance_class.gap_m
         part_xy = np.array(scene.part_pose_gt.xyz[:2])
         target_xy = np.array(scene.target_pose_gt.xyz[:2])
@@ -218,7 +220,7 @@ class AgxBackend(Backend):
             benchmark_version=BENCHMARK_VERSION + "+agx", source=Source.SIM,
             scene=scene,
             model=ModelTrace(model_id=model_id,
-                             language_instruction="从料箱拿起瓶盖, 拧紧到瓶子上",
+                             language_instruction="pick the cap from the bin and screw it onto the bottle",
                              chunk=chunk),
             robot=robot, outcome=outcome,
             media={"video_uris": [], "sim_state_log_uri": None},

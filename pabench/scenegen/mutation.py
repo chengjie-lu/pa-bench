@@ -1,7 +1,7 @@
-"""FR-1.2 变异测试生成 —— 对标称场景做参数化扰动, 全量参数写入 perturbation。真实现。
+"""FR-1.2 mutation-test generation — parametric perturbation of the nominal scene, with all parameters written to perturbation. Real implementation.
 
-扰动维度: 零件位姿 (dx/dy/dyaw)、光照 lux_factor (影响模型感知噪声)、摩擦 friction。
-friction 按 schema 记录但本纵切的 FakeSimBackend 不消费它 (接 MuJoCo 后端时生效)。
+Perturbation dimensions: part pose (dx/dy/dyaw), lighting lux_factor (affects model perception noise), friction.
+friction is recorded per the schema but this slice's FakeSimBackend does not consume it (it takes effect with the MuJoCo backend).
 """
 from __future__ import annotations
 

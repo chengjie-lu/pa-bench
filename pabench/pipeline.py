@@ -1,10 +1,10 @@
-"""M-FE2 共享编排层 (fe-rq.md §13): demo CLI 与 platform API 复用同一条评测流水线。
+"""M-FE2 shared orchestration layer (fe-rq.md §13): the demo CLI and the platform API reuse the same evaluation pipeline.
 
-职责: 场景生成 → (模型 × 硬件) 逐组合执行 → MR-1 协议判定 → 归因 → 组合摘要。
-与 demo.py 原实现逐 seed 等价 (NFR-1: 同 RunConfig 产物哈希一致), 额外提供:
-  - on_event 回调: 每回合/每组合进度事件 (SSE 推送的数据源, FR-FE-3.1)
-  - cancel_event: 回合边界响应取消 (§4.3 取消运行)
-  - pace_s: 演示节流 (FakeSim 全程 ~1s, 进度可视化时按需放慢)
+Responsibilities: scene generation → per-combo (model × hardware) execution → MR-1 protocol verdict → attribution → combo summary.
+Per-seed equivalent to the original demo.py implementation (NFR-1: same RunConfig → identical artifact hash), and additionally provides:
+  - on_event callback: per-episode/per-combo progress events (the data source pushed over SSE, FR-FE-3.1)
+  - cancel_event: responds to cancellation at episode boundaries (§4.3 cancel a run)
+  - pace_s: demo throttle (FakeSim runs ~1s total; slow it down when visualizing progress)
 """
 from __future__ import annotations
 
@@ -26,51 +26,51 @@ from .attribution import AttributionThresholds, attribute_episode
 
 MR_THETAS = [np.pi / 2, 2 * np.pi / 3, 5 * np.pi / 6]
 
-# 可选对象注册表 (GET /api/models / /api/hardware 的数据源)。
-# 接真实 VLA / 真机档案时在此登记即可被向导发现 (FR-2.4 / NFR-5)。
+# Registry of selectable objects (the data source for GET /api/models / /api/hardware).
+# Registering a real VLA / real-robot profile here makes it discoverable by the wizard (FR-2.4 / NFR-5).
 MODEL_REGISTRY = {m.model_id: m for m in (PreciseVLA, SloppyVLA)}
 HW_REGISTRY = {hw.hw_config_id: hw for hw in (CALIBRATED_ARM, WORN_ARM)}
 
 
 class RunCancelled(Exception):
-    """cancel_event 置位后在回合边界抛出, 由调用方收尾。"""
+    """Raised at an episode boundary once cancel_event is set; the caller does the cleanup."""
 
 
 @dataclass
 class RunConfig:
-    """一次评测运行的全部参数 (= /runs/new 向导三步的启动体, fe-rq.md §4.2)。"""
+    """All parameters of one evaluation run (= the launch body of the 3-step /runs/new wizard, fe-rq.md §4.2)."""
     model_ids: tuple = ("precise-vla-0.3", "sloppy-vla-0.1")
     hw_ids: tuple = ("arm-calibrated-2026Q2", "arm-worn-2023Q1")
-    backend: str = "fake"  # 执行后端: fake | mujoco | agx (NFR-5 即插即用)
+    backend: str = "fake"  # execution backend: fake | mujoco | agx (NFR-5 plug-and-play)
     seed: int = 7
-    # 策略开关与预算 (步骤②): nominal 必跑 MR 才有源回合
+    # strategy switches and budget (step ②): nominal must run for MR to have a source episode
     nominal: bool = True
     mutation_episodes: int = 24
     metamorphic: bool = True
-    # MutationGenerator 形参一一对应 (§4.2 mutation 参数面板)
+    # one-to-one with MutationGenerator parameters (§4.2 mutation parameter panel)
     pos_range_m: float = 0.015
     yaw_range_rad: float = 0.3
     lux_range: tuple = (0.3, 1.0)
     friction_range: tuple = (0.6, 1.2)
-    pace_s: float = 0.0  # 每回合后 sleep, 仅演示用
+    pace_s: float = 0.0  # sleep after each episode, demo only
 
     def validate(self):
         unknown = [m for m in self.model_ids if m not in MODEL_REGISTRY]
         if unknown:
-            raise ValueError(f"未注册的模型: {unknown}")
+            raise ValueError(f"unregistered models: {unknown}")
         unknown = [h for h in self.hw_ids if h not in HW_REGISTRY]
         if unknown:
-            raise ValueError(f"未注册的硬件档案: {unknown}")
+            raise ValueError(f"unregistered hardware profiles: {unknown}")
         if self.backend not in BACKEND_IDS:
-            raise ValueError(f"未知后端: {self.backend!r} (可选: {BACKEND_IDS})")
+            raise ValueError(f"unknown backend: {self.backend!r} (choices: {BACKEND_IDS})")
         if not self.model_ids or not self.hw_ids:
-            raise ValueError("至少各选 1 个模型与硬件档案")
+            raise ValueError("select at least 1 model and 1 hardware profile")
         if self.mutation_episodes < 0:
-            raise ValueError("mutation_episodes 不能为负")
+            raise ValueError("mutation_episodes cannot be negative")
         if self.metamorphic and not self.nominal:
-            raise ValueError("MR-1 需要 nominal 源回合 (FR-1.3), 不能单独启用 metamorphic")
+            raise ValueError("MR-1 needs a nominal source episode (FR-1.3); metamorphic cannot be enabled on its own")
         if not self.nominal and self.mutation_episodes == 0:
-            raise ValueError("至少启用一种场景策略")
+            raise ValueError("enable at least one scene strategy")
 
     def episodes_per_combo(self) -> int:
         return ((1 if self.nominal else 0) + self.mutation_episodes
@@ -111,7 +111,7 @@ class RunConfig:
 
 
 def build_scenes(cfg: RunConfig):
-    """场景生成 (在所有组合间共享 → 公平对比, NFR-2)。返回 (scenes, mrs)。"""
+    """Scene generation (shared across all combos → fair comparison, NFR-2). Returns (scenes, mrs)."""
     base = nominal_screw_cap()
     scenes = [base] if cfg.nominal else []
     if cfg.mutation_episodes:
@@ -126,9 +126,9 @@ def build_scenes(cfg: RunConfig):
 
 def run_combo(backend, model, hw, scenes, mrs, seed_base, thresholds,
               on_episode=None, cancel_event=None, pace_s=0.0):
-    """跑一个 (模型 × 硬件) 组合: 主回合 + MR-1 后继回合 + 归因。
+    """Run one (model × hardware) combo: main episodes + MR-1 follow-up episodes + attribution.
 
-    与 demo.py 原实现 seed 语义一致; on_episode(ep) 在每回合落库后调用。
+    seed semantics match the original demo.py implementation; on_episode(ep) is called after each episode is stored.
     """
     def _tick(ep):
         if cancel_event is not None and cancel_event.is_set():
@@ -139,14 +139,14 @@ def run_combo(backend, model, hw, scenes, mrs, seed_base, thresholds,
             time.sleep(pace_s)
 
     store = EpisodeStore()
-    # 主回合 (nominal + mutations)
+    # main episodes (nominal + mutations)
     for i, scene in enumerate(scenes):
         ep = backend.run_episode(scene, model, hw, seed=seed_base + i)
         store.add(ep)
         _tick(ep)
     nominal_ep = store.episodes[0]
 
-    # 变质测试 MR-1 (FR-1.3): 源回合 = nominal, 多旋转后继 → 协议级中位数判定
+    # metamorphic test MR-1 (FR-1.3): source episode = nominal, multiple rotated follow-ups → protocol-level median verdict
     checks, follow_ids = [], []
     for j, mr in enumerate(mrs):
         follow_scene = mr.apply(nominal_ep.scene, nominal_ep.episode_id)
@@ -162,7 +162,7 @@ def run_combo(backend, model, hw, scenes, mrs, seed_base, thresholds,
             if ep.episode_id in violated_ids:
                 ep.outcome.failure_label = (ep.outcome.failure_label or "") + "|mr1_violation"
 
-    # 归因 (FR-4): oracle 对照实验只在规则判不清时触发 (D1)
+    # attribution (FR-4): the oracle control experiment is triggered only when the rules are inconclusive (D1)
     oracle_calls = 0
 
     def oracle_fn(ep):
@@ -179,7 +179,7 @@ def run_combo(backend, model, hw, scenes, mrs, seed_base, thresholds,
 
 
 def summarize(model_id, hw_id, store, mr_verdict, oracle_calls):
-    """组合级摘要 (= report.json results[] 的一行)。"""
+    """Combo-level summary (= one row of report.json results[])."""
     eps = store.episodes
     sr = success_rate(eps)
     failed = [e for e in eps if not e.outcome.success]
@@ -209,13 +209,13 @@ def summarize(model_id, hw_id, store, mr_verdict, oracle_calls):
 
 
 def run_benchmark(cfg: RunConfig, on_event=None, cancel_event=None) -> dict:
-    """端到端执行一次评测运行。
+    """Run one evaluation run end to end.
 
-    on_event(dict) 事件流 (与 SSE 事件一一对应, fe-rq.md §8):
+    on_event(dict) event stream (one-to-one with the SSE events, fe-rq.md §8):
       scenes_ready {mutations, mrs} → combo_start {combo, index, total_combos}
       → episode_done {combo, episode_id, success, failure_label, done, total}
       → combo_done {combo, summary} → run_done {total}
-    取消时抛 RunCancelled (已完成回合不回滚, 由调用方决定保留与否)。
+    On cancellation it raises RunCancelled (completed episodes are not rolled back; the caller decides whether to keep them).
     """
     cfg.validate()
     emit = on_event or (lambda e: None)
@@ -234,7 +234,7 @@ def run_benchmark(cfg: RunConfig, on_event=None, cancel_event=None) -> dict:
         for hi, hw in enumerate(hws):
             combo_idx = mi * len(hws) + hi
             combo = f"{model.model_id} @ {hw.hw_config_id}"
-            # seed 语义与 demo.py 原实现一致 (NFR-1 跨入口可复现)
+            # seed semantics match the original demo.py implementation (NFR-1 reproducible across entry points)
             seed_base = cfg.seed + 100_000 * (combo_idx + 1)
             emit({"type": "combo_start", "combo": combo,
                   "index": combo_idx, "total_combos": total_combos})
@@ -258,7 +258,7 @@ def run_benchmark(cfg: RunConfig, on_event=None, cancel_event=None) -> dict:
 
     merged = EpisodeStore()
     for s in all_stores:
-        merged.episodes.extend(s.episodes)  # 已校验过谱系, 直接合并
+        merged.episodes.extend(s.episodes)  # lineage already validated, merge directly
     meta = {"benchmark_version": BENCHMARK_VERSION, "seed": cfg.seed,
             "total_episodes": len(merged), "attr_rules_version": thresholds.version}
     emit({"type": "run_done", "total": len(merged)})

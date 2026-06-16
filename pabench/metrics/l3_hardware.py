@@ -1,5 +1,5 @@
-"""L3 硬件层指标 (FR-3.11/3.12) —— 真实现 (numpy 周期图, 无 scipy 依赖)。
-FR-3.13 重复定位精度 / FR-3.14 摩擦辨识需要真机标定流程, 列入已知限制。"""
+"""L3 hardware-layer metrics (FR-3.11/3.12) — real implementation (numpy periodogram, no scipy dependency).
+FR-3.13 repeatability / FR-3.14 friction identification require a real-robot calibration procedure, listed as a known limitation."""
 from __future__ import annotations
 
 import numpy as np
@@ -8,10 +8,10 @@ from ..schema import Episode, Phase
 
 
 def tracking_error(ep: Episode) -> dict:
-    """FR-3.12 e_track: 实测 vs 指令的逐时刻偏差。
-    - rms_m / peak_m: align→fasten 全窗口 (含运动段, 受跟踪迟滞影响)
-    - steady_rms_m : fasten 窗口 (指令准静止) — 归因用的硬件判别量,
-      运动迟滞不污染, 反映漂移/抖动/噪声。"""
+    """FR-3.12 e_track: per-step deviation of actual vs command.
+    - rms_m / peak_m: full align→fasten window (includes motion segments, affected by tracking lag)
+    - steady_rms_m : fasten window (command quasi-static) — the hardware discriminator used for attribution,
+      uncontaminated by motion lag, reflects drift/jitter/noise."""
     _, a0, _ = next(s for s in ep.robot.phase_spans if s[0] is Phase.ALIGN)
     _, f0, f1 = next(s for s in ep.robot.phase_spans if s[0] is Phase.FASTEN)
     diff = ep.robot.ee_xyz_actual[a0:f1] - ep.model.chunk.cmd_xyz[a0:f1]
@@ -23,7 +23,7 @@ def tracking_error(ep: Episode) -> dict:
 
 
 def band_power(x: np.ndarray, fs: float, f_lo: float, f_hi: float) -> float:
-    """周期图法频段功率。"""
+    """Band power via the periodogram method."""
     x = np.asarray(x, float)
     x = x - x.mean()
     X = np.fft.rfft(x)
@@ -35,7 +35,7 @@ def band_power(x: np.ndarray, fs: float, f_lo: float, f_hi: float) -> float:
 
 
 def jitter_band_power(ep: Episode, f_band=(5.0, 50.0)) -> float:
-    """FR-3.11 末端抖动: 实测末端加速度 5–50 Hz 频段 PSD 能量 (三轴求和) [(m/s²)²]。"""
+    """FR-3.11 end-effector jitter: PSD energy of measured end-effector acceleration in the 5–50 Hz band (summed over 3 axes) [(m/s²)²]."""
     t = ep.robot.t
     dt = float(t[1] - t[0])
     fs = 1.0 / dt

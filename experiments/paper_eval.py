@@ -1,8 +1,8 @@
 #!/usr/bin/env python
-"""TSE 论文实验脚本: 用故障注入真值评估 PA-Bench 的区分力(RQ1)/归因(RQ2)/可反馈性(RQ3)。
+"""TSE paper experiment script: evaluate PA-Bench's discriminative power (RQ1) / attribution (RQ2) / actionability (RQ3) using fault-injection ground truth.
 
-全部统计量 (双比例 z 检验, Cohen's h, Mann-Whitney U, Cliff's delta, bootstrap CI)
-均为 numpy/纯 python 实现。输出 JSON 供论文引用。
+All statistics (two-proportion z-test, Cohen's h, Mann-Whitney U, Cliff's delta, bootstrap CI)
+are implemented in numpy / pure python. Outputs JSON for citation in the paper.
 """
 from __future__ import annotations
 
@@ -25,26 +25,26 @@ from pabench.metrics import jerk_cmd, plan_margin_ratio, tracking_error, wilson_
 from pabench.metrics.l2_process import auroc, peak_uncertainty
 from pabench.attribution import AttributionThresholds, attribute_episode
 
-# ---------------- 修复动作对应的"改进版"被测对象 (RQ3 fix-congruence) ----------------
+# ---------------- "improved" subjects matching a repair action (RQ3 fix-congruence) ----------------
 
 
 class SloppyDebiasedVLA(SloppyVLA):
-    """模型侧修复: 手眼标定复检 → 去除世界系偏置 (噪声/抖动保留)。"""
+    """Model-side fix: hand-eye recalibration → removes the world-frame bias (noise/jitter kept)."""
     model_id = "sloppy-vla-0.1+debias"
     bias_world_m = np.zeros(2)
 
 
 class PreciseSharpVLA(PreciseVLA):
-    """模型侧修复(用于错误修复对照): 感知噪声减半。"""
+    """Model-side fix (used as a wrong-fix control): perception noise halved."""
     model_id = "precise-vla-0.3+sharp"
     sigma_base_m = 0.175e-3
 
 
-PRISTINE_ARM = HardwareProfile(  # 硬件侧修复(用于错误修复对照): 全新标定臂
+PRISTINE_ARM = HardwareProfile(  # hardware-side fix (used as a wrong-fix control): a brand-new calibrated arm
     hw_config_id="arm-pristine", tracking_alpha=0.5,
     droop_xy=(0.02e-3, -0.01e-3), track_noise_std=0.03e-3, jitter_amp=0.02e-3)
 
-# ---------------- 统计工具 ----------------
+# ---------------- statistics utilities ----------------
 
 
 def phi(x):
@@ -58,6 +58,7 @@ def two_prop_z(k1, n1, k2, n2):
     z = (p1 - p2) / se if se > 0 else 0.0
     pval = 2 * (1 - phi(abs(z)))
     h = 2 * math.asin(math.sqrt(p1)) - 2 * math.asin(math.sqrt(p2))  # Cohen's h
+
     return {"p1": p1, "p2": p2, "z": z, "p_value": pval, "cohens_h": h}
 
 
@@ -67,7 +68,7 @@ def mann_whitney(x, y):
     allv = np.concatenate([x, y])
     order = np.argsort(allv, kind="mergesort")
     ranks = np.empty(len(allv)); ranks[order] = np.arange(1, len(allv) + 1)
-    # 并列秩平均
+    # tie-averaged ranks
     sv = allv[order]; i = 0
     rs = np.arange(1, len(allv) + 1, dtype=float)
     while i < len(sv):
@@ -98,7 +99,7 @@ def bootstrap_auroc(scores, labels, B=500, seed=0):
                                      float(np.percentile(vals, 97.5))]}
 
 
-# ---------------- 实验执行 ----------------
+# ---------------- experiment execution ----------------
 
 N_SEEDS, N_SCENES = 10, 100
 backend = FakeSimBackend()
@@ -107,7 +108,7 @@ base = nominal_screw_cap()
 
 
 def run_condition(model, hw, attribute=False):
-    """N_SEEDS × N_SCENES 回合; 场景在同 seed 内跨条件共享(公平对比)。"""
+    """N_SEEDS × N_SCENES episodes; scenes are shared across conditions within the same seed (fair comparison)."""
     eps = []
     for s in range(N_SEEDS):
         scenes = MutationGenerator(seed=s).generate(base, "anchor", N_SCENES)
@@ -129,7 +130,7 @@ def sr_of(eps):
 t0 = time.time()
 res = {"config": {"n_seeds": N_SEEDS, "n_scenes": N_SCENES}}
 
-print("== RQ1: 区分力 ==", flush=True)
+print("== RQ1: discriminative power ==", flush=True)
 P_cal = run_condition(PreciseVLA(), CALIBRATED_ARM, attribute=True)
 S_cal = run_condition(SloppyVLA(), CALIBRATED_ARM, attribute=True)
 P_worn = run_condition(PreciseVLA(), WORN_ARM, attribute=True)
@@ -146,12 +147,12 @@ res["rq1"] = {
                                    [plan_margin_ratio(e) for e in P_cal]),
     "etrack_mw": mann_whitney([tracking_error(e)["steady_rms_m"] for e in P_worn],
                               [tracking_error(e)["steady_rms_m"] for e in P_cal]),
-    # e_plan 跨硬件不变性 (分解有效性): precise cal vs worn
+    # e_plan cross-hardware invariance (decomposition validity): precise cal vs worn
     "plan_margin_hw_invariance_mw": mann_whitney(
         [plan_margin_ratio(e) for e in P_worn], [plan_margin_ratio(e) for e in P_cal]),
 }
 
-print("== RQ2: 归因准确率 (故障注入真值) ==", flush=True)
+print("== RQ2: attribution accuracy (fault-injection ground truth) ==", flush=True)
 
 
 def attr_counts(eps):
@@ -176,7 +177,7 @@ res["rq2"] = {
     "ambiguous_rate": (cm.get("ambiguous", 0) + ch.get("ambiguous", 0)) / (n_m + n_h),
 }
 
-# MR-1 检出 (20 seeds)
+# MR-1 detection (20 seeds)
 mr_det = {"precise_violations": 0, "sloppy_violations": 0, "n": 20}
 for s in range(20):
     for model, key in [(PreciseVLA(), "precise_violations"), (SloppyVLA(), "sloppy_violations")]:
@@ -191,8 +192,8 @@ for s in range(20):
             mr_det[key] += 1
 res["rq2"]["mr1"] = mr_det
 
-print("== RQ3: 可反馈性 ==", flush=True)
-# 3a 不确定性预警 AUROC (precise, 全部硬件池化以包含两类失败)
+print("== RQ3: actionability ==", flush=True)
+# 3a uncertainty-warning AUROC (precise, pooled over all hardware to include both failure types)
 pool = P_cal + P_worn
 scores = [peak_uncertainty(e) for e in pool]
 labels = [not e.outcome.success for e in pool]
@@ -203,19 +204,19 @@ res["rq3"] = {"uncertainty": {
     "sloppy_cal": bootstrap_auroc([peak_uncertainty(e) for e in S_cal],
                                   [not e.outcome.success for e in S_cal], seed=3)}}
 
-# 3b fix-congruence: 按归因建议修复 vs 错误修复
+# 3b fix-congruence: repair suggested by attribution vs a wrong repair
 S_cal_debias = run_condition(SloppyDebiasedVLA(), CALIBRATED_ARM)
 S_pristine = run_condition(SloppyVLA(), PRISTINE_ARM)
-P_cal_after = run_condition(PreciseVLA(), CALIBRATED_ARM)  # = 修复 worn 硬件
+P_cal_after = run_condition(PreciseVLA(), CALIBRATED_ARM)  # = repairing the worn hardware
 P_worn_sharp = run_condition(PreciseSharpVLA(), WORN_ARM)
 sr_sd, sr_sp = sr_of(S_cal_debias), sr_of(S_pristine)
 sr_pa, sr_ps = sr_of(P_cal_after), sr_of(P_worn_sharp)
 res["rq3"]["fix_congruence"] = {
-    "model_fault": {  # sloppy@cal, 归因=model
+    "model_fault": {  # sloppy@cal, attribution=model
         "baseline": sr_sc,
         "right_fix_debias": {**sr_sd, **two_prop_z(sr_sd["k"], sr_sd["n"], sr_sc["k"], sr_sc["n"])},
         "wrong_fix_hw": {**sr_sp, **two_prop_z(sr_sp["k"], sr_sp["n"], sr_sc["k"], sr_sc["n"])}},
-    "hw_fault": {     # precise@worn, 归因=hardware
+    "hw_fault": {     # precise@worn, attribution=hardware
         "baseline": sr_pw,
         "right_fix_hw": {**sr_pa, **two_prop_z(sr_pa["k"], sr_pa["n"], sr_pw["k"], sr_pw["n"])},
         "wrong_fix_model": {**sr_ps, **two_prop_z(sr_ps["k"], sr_ps["n"], sr_pw["k"], sr_pw["n"])}},

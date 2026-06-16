@@ -1,11 +1,11 @@
 #!/usr/bin/env python
-"""PA-Bench Console 服务模式入口 (M-FE2, fe-rq.md §13):
+"""PA-Bench Console server-mode entry point (M-FE2, fe-rq.md §13):
 
   python serve.py [--port 8000] [--host 127.0.0.1]
-  → http://127.0.0.1:8000/  (同一进程: FastAPI /api/* + 静态前端 web/)
+  → http://127.0.0.1:8000/  (one process: FastAPI /api/* + static frontend web/)
 
-已有 out/ 产物会被自动导入为历史运行 run-000-legacy-out;
-新运行经浏览器 /runs/new 向导发起, 产物落盘 runs/<run_id>/。
+Existing out/ artifacts are auto-imported as the historical run run-000-legacy-out;
+new runs are launched via the browser /runs/new wizard, with artifacts persisted to runs/<run_id>/.
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ def main():
     args = ap.parse_args()
     app = create_app(runs_dir=ROOT / "runs", web_dir=ROOT / "web",
                      legacy_out=ROOT / "out")
-    print(f"PA-Bench Console (M-FE2 服务模式): http://{args.host}:{args.port}/")
+    print(f"PA-Bench Console (M-FE2 server mode): http://{args.host}:{args.port}/")
     uvicorn.run(app, host=args.host, port=args.port, log_level="info")
 
 

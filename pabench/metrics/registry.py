@@ -1,5 +1,5 @@
-"""FR-5.1 指标注册表 —— 真实现。
-机检规则 (R-8): 每个指标必须绑定 ≥1 条改进动作, 否则 validate_registry 抛错, 不允许上线。
+"""FR-5.1 metric registry — real implementation.
+Machine-check rule (R-8): every metric must bind ≥1 improvement action, otherwise validate_registry raises and it cannot ship.
 """
 from __future__ import annotations
 
@@ -58,10 +58,10 @@ METRIC_REGISTRY = {
 
 
 def validate_registry(registry: dict = METRIC_REGISTRY) -> None:
-    """R-8 机检: 无改进动作绑定的指标不允许上线。"""
+    """R-8 machine-check: a metric with no improvement action bound is not allowed to ship."""
     offenders = [k for k, v in registry.items()
                  if not v.get("improvement_actions")]
     missing_def = [k for k, v in registry.items() if not v.get("definition")]
     if offenders or missing_def:
         raise ValueError(
-            f"指标注册表机检失败: 缺改进动作 {offenders}; 缺定义 {missing_def}")
+            f"metric registry machine-check failed: missing improvement actions {offenders}; missing definitions {missing_def}")

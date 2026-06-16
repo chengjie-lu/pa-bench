@@ -1,13 +1,13 @@
 from .base import Backend, HardwareProfile
 from .fake_sim import CALIBRATED_ARM, WORN_ARM, FakeSimBackend
 
-# 后端工厂 (NFR-5 即插即用): RunConfig.backend / API 按名取后端。
-# 物理后端 (mujoco / agx) 惰性导入 —— 缺库/缺许可不影响默认 fake 链路。
+# Backend factory (NFR-5 plug-and-play): RunConfig.backend / the API pick a backend by name.
+# Physics backends (mujoco / agx) are imported lazily — a missing library/license does not affect the default fake path.
 BACKEND_IDS = ("fake", "mujoco", "agx")
 
 
 def make_backend(backend_id: str = "fake", dt: float = None) -> Backend:
-    """按 id 实例化执行后端。dt=None 时各后端用自身默认控制步长。"""
+    """Instantiate an execution backend by id. With dt=None each backend uses its own default control step."""
     if backend_id == "fake":
         return FakeSimBackend() if dt is None else FakeSimBackend(dt)
     if backend_id == "mujoco":
@@ -16,4 +16,4 @@ def make_backend(backend_id: str = "fake", dt: float = None) -> Backend:
     if backend_id == "agx":
         from .agx_sim import AgxBackend
         return AgxBackend() if dt is None else AgxBackend(dt)
-    raise ValueError(f"未知后端: {backend_id!r} (可选: {BACKEND_IDS})")
+    raise ValueError(f"unknown backend: {backend_id!r} (choices: {BACKEND_IDS})")

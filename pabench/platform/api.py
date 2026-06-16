@@ -1,8 +1,8 @@
-"""FastAPI 包装 (fe-rq.md §8 契约): pabench 流水线的发起 / 进度 SSE / 结果消费。
+"""FastAPI wrapper (fe-rq.md §8 contract): launch / progress SSE / result consumption for the pabench pipeline.
 
-M-FE2 范围: 不含场景编辑器与 oracle-replay (M-FE3)。
-所有写操作预留 auth header 位 (NFR-FE N7) —— V1 内网免登录, 不校验。
-静态前端 (web/) 由同一进程挂载, 浏览器同源直连 /api/*。
+M-FE2 scope: no scene editor and no oracle-replay (those are M-FE3).
+All write operations reserve an auth-header slot (NFR-FE N7) — V1 is intranet, login-free, not validated.
+The static frontend (web/) is mounted by the same process; the browser hits /api/* same-origin.
 """
 from __future__ import annotations
 
@@ -24,20 +24,20 @@ from .run_manager import RunManager, TERMINAL
 
 ROOT = Path(__file__).resolve().parent.parent.parent  # pa-bench/
 
-# 回合列表可排序列 (服务端排序, fe-rq.md §6: 数据可能 >10k 回合)
+# sortable columns of the episode list (server-side sort, fe-rq.md §6: data may exceed 10k episodes)
 SORTABLE = {"episode_id", "model_id", "hw_config_id", "lux", "success",
             "duration_s", "plan_margin_ratio", "e_track_steady_rms_mm",
             "peak_uncertainty"}
-# 大数组字段 (stride 降采样目标, NFR-FE N2)
+# large-array fields (targets for stride downsampling, NFR-FE N2)
 _MODEL_ARRAYS = ["t", "cmd_xyz", "cmd_yaw", "entropy", "latency_ms"]
 _ROBOT_ARRAYS = ["t", "ee_xyz_actual", "ee_yaw_actual", "ft_wrench", "gripper_width"]
 
 
 def _stride_episode(d: dict, stride: int) -> dict:
-    """按 stride 降采样回合大数组 (§8 调试页先 stride=4 快渲染再拉全量)。"""
+    """Downsample an episode's large arrays by stride (§8: the debug page first renders with stride=4, then fetches the full data)."""
     if stride <= 1:
         return d
-    d = json.loads(json.dumps(d))  # 深拷贝, 不污染磁盘缓存
+    d = json.loads(json.dumps(d))  # deep copy, so the disk cache is not polluted
     for k in _MODEL_ARRAYS:
         v = d["model"]["actions"].get(k)
         if v is not None:
@@ -53,7 +53,7 @@ def _stride_episode(d: dict, stride: int) -> dict:
 
 
 def _calib_quarter(hw_config_id: str) -> tuple[str | None, bool]:
-    """从 hw_config_id 尾缀解析标定季度 (如 2023Q1); 距今 >4 个季度 → 过期标黄 (§4.2)。"""
+    """Parse the calibration quarter from the hw_config_id suffix (e.g. 2023Q1); >4 quarters old → stale, flagged yellow (§4.2)."""
     tail = hw_config_id.rsplit("-", 1)[-1]
     if len(tail) == 6 and tail[:4].isdigit() and tail[4] == "Q" and tail[5].isdigit():
         y, q = int(tail[:4]), int(tail[5])
@@ -65,7 +65,7 @@ def _calib_quarter(hw_config_id: str) -> tuple[str | None, bool]:
 
 def create_app(runs_dir: Path | None = None, web_dir: Path | None = None,
                legacy_out: Path | None = None) -> FastAPI:
-    validate_registry()  # R-8: 服务起不来好过带病上线
+    validate_registry()  # R-8: failing to start is better than shipping broken
     manager = RunManager(runs_dir or ROOT / "runs",
                          legacy_out if legacy_out is not None else ROOT / "out")
     app = FastAPI(title="PA-Bench Platform API", version=BENCHMARK_VERSION,
@@ -75,29 +75,29 @@ def create_app(runs_dir: Path | None = None, web_dir: Path | None = None,
     def _run_or_404(run_id: str):
         run = manager.get(run_id)
         if not run:
-            raise HTTPException(404, f"运行不存在: {run_id}")
+            raise HTTPException(404, f"run not found: {run_id}")
         return run
 
-    # ---------------- 元信息 ----------------
+    # ---------------- metadata ----------------
     @app.get("/api/ping")
     def ping():
-        """前端模式探测: 200 → server 模式, 失败 → M-FE1 静态模式。"""
+        """Frontend mode probe: 200 → server mode, failure → M-FE1 static mode."""
         return {"service": "pa-bench-platform", "benchmark_version": BENCHMARK_VERSION,
                 "milestone": "M-FE2"}
 
     @app.get("/api/models")
     def models():
-        """向导步骤① 模型多选 (FR-2.4: 注册即被发现)。"""
+        """Wizard step ① model multi-select (FR-2.4: registered means discoverable)."""
         return {"models": [
             {"model_id": mid,
-             # 两个假模型都输出 entropy; 真模型缺失时 ActionChunk.entropy=None → False
+             # both fake models emit entropy; for a real model lacking it, ActionChunk.entropy=None → False
              "provides_uncertainty": True,
              "fake": True}
             for mid in MODEL_REGISTRY]}
 
     @app.get("/api/hardware")
     def hardware():
-        """向导步骤① 硬件档案多选 (标定过期标黄, NFR-2)。"""
+        """Wizard step ① hardware-profile multi-select (stale calibration flagged yellow, NFR-2)."""
         out = []
         for hid, hw in HW_REGISTRY.items():
             quarter, stale = _calib_quarter(hid)
@@ -112,7 +112,7 @@ def create_app(runs_dir: Path | None = None, web_dir: Path | None = None,
 
     @app.post("/api/scenes/preview")
     async def scenes_preview(request: Request):
-        """向导步骤②「预览采样」: 返回前 N 个采样场景的参数卡, 不执行 (§4.2)。"""
+        """Wizard step ② "preview sampling": return the parameter cards of the first N sampled scenes, without executing (§4.2)."""
         body = await request.json()
         n = min(int(body.get("n", 12)), 50)
         try:
@@ -125,7 +125,7 @@ def create_app(runs_dir: Path | None = None, web_dir: Path | None = None,
             {"scene_id": s.scene_id, "perturbation": s.perturbation}
             for s in scenes[1:n + 1]]}
 
-    # ---------------- 运行 ----------------
+    # ---------------- runs ----------------
     @app.get("/api/runs")
     def list_runs():
         return {"runs": [dict(r.meta(), benchmark_version=BENCHMARK_VERSION)
@@ -133,14 +133,14 @@ def create_app(runs_dir: Path | None = None, web_dir: Path | None = None,
 
     @app.post("/api/runs", status_code=201)
     async def create_run(request: Request):
-        """启动体 = 向导全部选项 + seed (FR-FE-2.1)。返回 run_id, 执行在后台线程。"""
+        """The launch body = all wizard options + seed (FR-FE-2.1). Returns run_id; execution runs on a background thread."""
         body = await request.json()
         try:
             cfg = RunConfig.from_dict(body)
         except (ValueError, TypeError) as e:
             raise HTTPException(400, str(e))
         if cfg.total_episodes() > 5000:
-            raise HTTPException(400, f"总回合数 {cfg.total_episodes()} 超出上限 5000")
+            raise HTTPException(400, f"total episodes {cfg.total_episodes()} exceeds the cap of 5000")
         run = manager.start_run(cfg)
         return {"run_id": run.run_id, "total_episodes": run.total}
 
@@ -152,12 +152,12 @@ def create_app(runs_dir: Path | None = None, web_dir: Path | None = None,
     def cancel_run(run_id: str):
         run = _run_or_404(run_id)
         if not manager.cancel(run.run_id):
-            raise HTTPException(409, f"运行已是终态: {run.status}")
+            raise HTTPException(409, f"run is already in a terminal state: {run.status}")
         return {"run_id": run.run_id, "cancelling": True}
 
     @app.get("/api/runs/{run_id}/progress")
     def progress(run_id: str):
-        """SSE 断线降级轮询端点 (§8): 状态 + 计数 + 最近 20 条事件。"""
+        """SSE disconnect-fallback polling endpoint (§8): status + counts + the last 20 events."""
         run = _run_or_404(run_id)
         return {"run_id": run.run_id, "status": run.status,
                 "done": run.done, "total": run.total,
@@ -167,7 +167,7 @@ def create_app(runs_dir: Path | None = None, web_dir: Path | None = None,
 
     @app.get("/api/runs/{run_id}/events")
     async def events(run_id: str):
-        """SSE: 先重放事件历史再实时推送; 终态后发 run_closed 收尾 (§11)。"""
+        """SSE: replay the event history first, then push live; after the terminal state send run_closed to finish (§11)."""
         run = _run_or_404(run_id)
 
         async def stream():
@@ -181,11 +181,11 @@ def create_app(runs_dir: Path | None = None, web_dir: Path | None = None,
                     yield (f"event: run_closed\ndata: "
                            f"{json.dumps({'status': run.status}, ensure_ascii=False)}\n\n")
                     return
-                # 阻塞等待新事件 (线程信号), 2s 超时发心跳注释保活
+                # block waiting for a new event (thread signal); on 2s timeout send a heartbeat comment to keep alive
                 got = await run_in_threadpool(run.wait_new, seq, 2.0)
                 if not got:
                     yield ": heartbeat\n\n"
-                await asyncio.sleep(0)  # 让出事件循环
+                await asyncio.sleep(0)  # yield the event loop
 
         return StreamingResponse(stream(), media_type="text/event-stream",
                                  headers={"Cache-Control": "no-cache",
@@ -193,24 +193,24 @@ def create_app(runs_dir: Path | None = None, web_dir: Path | None = None,
 
     @app.get("/api/runs/{run_id}/summary")
     def summary(run_id: str):
-        """= report.json (meta + results[]) (§8)。"""
+        """= report.json (meta + results[]) (§8)."""
         run = _run_or_404(run_id)
         path = run.dir / "report.json"
         if not path.exists():
-            raise HTTPException(409, f"运行未完成 (status={run.status}), 暂无 summary")
+            raise HTTPException(409, f"run not finished (status={run.status}), no summary yet")
         return json.loads(path.read_text())
 
     @app.get("/api/runs/{run_id}/index")
     def run_index(run_id: str):
-        """回合索引 + C1/C2/C3/C5 预聚合 — 与 M-FE1 web/data/index.json 同构,
-        前端适配层零改动复用现有视图 (聚合在后端做, §8)。"""
+        """Episode index + C1/C2/C3/C5 pre-aggregations — isomorphic to M-FE1 web/data/index.json,
+        so the frontend adapter reuses the existing views with zero changes (aggregated on the backend, §8)."""
         run = _run_or_404(run_id)
         index = manager.load_index(run)
         if index is None:
-            raise HTTPException(409, f"运行未完成 (status={run.status}), 暂无 index")
+            raise HTTPException(409, f"run not finished (status={run.status}), no index yet")
         return dict(index, run_id=run.run_id)
 
-    # ---------------- 回合 ----------------
+    # ---------------- episodes ----------------
     @app.get("/api/episodes")
     def list_episodes(
         run: str = Query("latest"), model_id: str | None = None,
@@ -222,11 +222,11 @@ def create_app(runs_dir: Path | None = None, web_dir: Path | None = None,
         sort: str = "episode_id", order: str = "asc",
         page: int = Query(1, ge=1), size: int = Query(50, ge=1, le=500),
     ):
-        """服务端筛选 + 排序 + 分页 (§4.4 全部筛选项; 列表永不返回大数组, N2)。"""
+        """Server-side filter + sort + pagination (§4.4 all filters; the list never returns large arrays, N2)."""
         r = _run_or_404(run)
         index = manager.load_index(r)
         if index is None:
-            raise HTTPException(409, f"运行未完成 (status={r.status})")
+            raise HTTPException(409, f"run not finished (status={r.status})")
         recs = index["episodes"]
         eq_filters = {"model_id": model_id, "hw_config_id": hw_config_id,
                       "task_type": task_type, "tolerance_class": tolerance_class,
@@ -243,7 +243,7 @@ def create_app(runs_dir: Path | None = None, web_dir: Path | None = None,
         if lux_max is not None:
             recs = [x for x in recs if x["lux"] <= lux_max]
         if sort not in SORTABLE:
-            raise HTTPException(400, f"不支持的排序列: {sort}")
+            raise HTTPException(400, f"unsupported sort column: {sort}")
         recs = sorted(recs, key=lambda x: (x[sort] is None, x[sort]),
                       reverse=(order == "desc"))
         total = len(recs)
@@ -253,13 +253,13 @@ def create_app(runs_dir: Path | None = None, web_dir: Path | None = None,
 
     @app.get("/api/episodes/{episode_id}")
     def episode_detail(episode_id: str, stride: int = Query(1, ge=1, le=64)):
-        """单回合全量 (含大数组), stride 降采样走独立请求 (§8/N2)。"""
+        """Full single episode (with large arrays); stride downsampling is a separate request (§8/N2)."""
         path = manager.find_episode(episode_id)
         if path is None:
-            raise HTTPException(404, f"回合不存在: {episode_id}")
+            raise HTTPException(404, f"episode not found: {episode_id}")
         return _stride_episode(json.loads(path.read_text()), stride)
 
-    # ---------------- 静态前端 (放最后, /api 优先匹配) ----------------
+    # ---------------- static frontend (mounted last, so /api matches first) ----------------
     web = web_dir if web_dir is not None else ROOT / "web"
     if web.is_dir():
         app.mount("/", StaticFiles(directory=web, html=True), name="web")

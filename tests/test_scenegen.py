@@ -1,4 +1,4 @@
-"""场景生成: 变异确定性与参数记录 (FR-1.2), MR-1 变质关系 (FR-1.3)。"""
+"""Scene generation: mutation determinism and parameter recording (FR-1.2), MR-1 metamorphic relation (FR-1.3)."""
 import math
 
 import numpy as np
@@ -15,7 +15,7 @@ def test_dtw_mean_distance_basics():
     a = np.column_stack([np.linspace(0, 1, 50), np.zeros(50), np.zeros(50)])
     assert dtw_mean_distance(a, a) == pytest.approx(0.0)
     b = a.copy()
-    b[:, 1] += 0.002  # 垂直于路径的恒定偏置无法被规整吸收
+    b[:, 1] += 0.002  # a constant offset perpendicular to the path cannot be absorbed by warping
     assert dtw_mean_distance(a, b) == pytest.approx(0.002, rel=0.05)
 
 
@@ -29,7 +29,7 @@ def test_mutation_deterministic_and_recorded(base_scene):
         assert set(s.perturbation) == {"part_dx", "part_dy", "part_dyaw", "lux_factor", "friction"}
         assert 0.3 <= s.perturbation["lux_factor"] <= 1.0
         assert abs(s.perturbation["part_dx"]) <= 0.015
-        # 扰动确实作用在场景真值上
+        # the perturbation actually applies to the scene ground truth
         assert s.part_pose_gt.xyz[0] == pytest.approx(
             base_scene.part_pose_gt.xyz[0] + s.perturbation["part_dx"])
 
@@ -53,8 +53,8 @@ def test_mr1_scene_geometry(base_scene):
 
 
 def test_mr1_precise_passes_sloppy_violates(backend, base_scene):
-    """等变模型应通过 MR-1; 带世界系偏置的模型应违反 — 这是归因 rule1 的依据。
-    按协议判定: 多旋转后继的中位距离 (单次比较会被感知噪声左右)。"""
+    """An equivariant model should pass MR-1; a model with a world-frame bias should violate it — the basis for attribution rule1.
+    Decided per protocol: the median distance over multiple rotated follow-ups (a single comparison is swayed by perception noise)."""
     thetas = [math.pi / 2, 2 * math.pi / 3, 5 * math.pi / 6]
     for model, expect_violated in [(PreciseVLA(), False), (SloppyVLA(), True)]:
         src = backend.run_episode(base_scene, model, CALIBRATED_ARM, seed=300)

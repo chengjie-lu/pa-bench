@@ -1,6 +1,6 @@
-"""FR-6 可视化 (纵切版) —— 真实现: 静态 HTML 报告。
-三层信息架构的第①层 (红绿灯摘要) + 第②层 (对比表/归因分布)。
-第③层 (视频+3D 轨迹回放) 需要渲染管线, 列入已知限制; Web 交互平台为 M4。
+"""FR-6 visualization (vertical-slice version) — real implementation: a static HTML report.
+Layer ① (traffic-light summary) + layer ② (comparison table / attribution mix) of the three-layer information architecture.
+Layer ③ (video + 3D trajectory replay) needs a render pipeline, listed as a known limitation; the interactive web platform is M4.
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ def _fmt(v, nd=3):
 
 
 def build_html(results: list[dict], meta: dict) -> str:
-    """results: 每个 (model × hw) 组合一条聚合记录 (见 demo.py summarize)。"""
+    """results: one aggregate record per (model × hw) combo (see demo.py summarize)."""
     rows = []
     for r in sorted(results, key=lambda x: -x["sr"]):
         attr = ", ".join(f"{k}:{v}" for k, v in sorted(r["attribution_counts"].items())) or "—"
@@ -40,17 +40,17 @@ def build_html(results: list[dict], meta: dict) -> str:
             f"<td>{_fmt(r['jitter_band_mean'])}</td>"
             f"<td>{_fmt(r['jerk_cmd_median'], 3)}</td>"
             f"<td>{_fmt(r['uncertainty_auroc'])}</td>"
-            f"<td>{'❌ 违反' if r['mr1_violated'] else '✅ 通过'} "
+            f"<td>{'❌ violated' if r['mr1_violated'] else '✅ passed'} "
             f"({r['mr1_median_dist_mm']:.1f}mm)</td>"
             f"<td>{ff}</td><td>{attr}</td></tr>")
 
     best = max(results, key=lambda x: x["sr"])
-    summary = (f"<p class='big'>{_light(best['sr'])} 当前最优组合: "
+    summary = (f"<p class='big'>{_light(best['sr'])} Current best combo: "
                f"<b>{html.escape(best['model_id'])}</b> @ {html.escape(best['hw_config_id'])}, "
-               f"成功率 {best['sr']:.0%}。绿=可用(≥80%), 黄=有风险(≥50%), 红=不可用。</p>")
+               f"success rate {best['sr']:.0%}. Green=usable(≥80%), yellow=at risk(≥50%), red=not usable.</p>")
 
     return f"""<!doctype html><html><head><meta charset="utf-8">
-<title>PA-Bench 报告</title>
+<title>PA-Bench report</title>
 <style>
 body{{font-family:-apple-system,sans-serif;margin:2em;max-width:1200px}}
 table{{border-collapse:collapse;width:100%;font-size:13px}}
@@ -58,24 +58,24 @@ td,th{{border:1px solid #ccc;padding:6px 8px;text-align:left}}
 th{{background:#f0f0f0}} .big{{font-size:18px}}
 .meta{{color:#666;font-size:12px}}
 </style></head><body>
-<h1>PA-Bench 评测报告 — 瓶盖拧紧 (screw_cap, T1)</h1>
+<h1>PA-Bench evaluation report — screw cap (screw_cap, T1)</h1>
 <p class="meta">benchmark_version: {html.escape(meta['benchmark_version'])} ·
-seed: {meta['seed']} · 总回合数: {meta['total_episodes']} · 归因规则: {html.escape(meta['attr_rules_version'])}</p>
-<h2>① 摘要 (面向非机器人背景读者)</h2>
+seed: {meta['seed']} · total episodes: {meta['total_episodes']} · attribution rules: {html.escape(meta['attr_rules_version'])}</p>
+<h2>① Summary (for readers without a robotics background)</h2>
 {summary}
-<h2>② 模型 × 硬件 对比 (工程层)</h2>
+<h2>② Model × hardware comparison (engineering layer)</h2>
 <table>
-<tr><th></th><th>模型</th><th>硬件档案</th><th>成功率 [95% CI]</th>
-<th>e_plan 裕度比均值<br>(>1=模型规划必败)</th><th>e_track RMS 均值 mm<br>(硬件跟踪)</th>
-<th>抖动频段能量<br>(m/s²)²</th><th>指令 jerk 中位数</th><th>不确定性 AUROC</th>
-<th>MR-1 等变性<br>(中位距离)</th><th>首败阶段分布</th><th>失败归因分布</th></tr>
+<tr><th></th><th>Model</th><th>Hardware profile</th><th>Success rate [95% CI]</th>
+<th>Mean e_plan margin ratio<br>(>1 = model plan must fail)</th><th>Mean e_track RMS mm<br>(hardware tracking)</th>
+<th>Jitter band energy<br>(m/s²)²</th><th>Median command jerk</th><th>Uncertainty AUROC</th>
+<th>MR-1 equivariance<br>(median distance)</th><th>First-failure phase mix</th><th>Failure attribution mix</th></tr>
 {''.join(rows)}
 </table>
-<h2>③ 读法 (归因 → 改进动作)</h2>
+<h2>③ How to read it (attribution → improvement action)</h2>
 <ul>
-<li>归因 <b>model</b> 多 ⇒ 看 e_plan 裕度比与 MR 违反率: 偏置型 ⇒ 手眼标定/视觉微调; 随机型 ⇒ 补训练数据。</li>
-<li>归因 <b>hardware</b> 多 ⇒ 看 e_track RMS 与抖动能量: 安排控制器整定或维保。</li>
-<li>归因 <b>environment</b> ⇒ 扰动出训练分布且 oracle 也失败: 改工位条件或扩采集范围。</li>
+<li>Mostly <b>model</b> attribution ⇒ look at e_plan margin ratio and MR violation rate: bias-type ⇒ hand-eye calibration / vision fine-tune; random-type ⇒ add training data.</li>
+<li>Mostly <b>hardware</b> attribution ⇒ look at e_track RMS and jitter energy: schedule controller tuning or maintenance.</li>
+<li><b>environment</b> attribution ⇒ perturbation out of the training distribution and the oracle also fails: change the workstation conditions or widen the collection range.</li>
 </ul>
 </body></html>"""
 

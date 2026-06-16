@@ -1,4 +1,4 @@
-"""归因引擎: 决策树各分支 (FR-4.1) + 端到端归因行为 (FR-4.2/4.3)。"""
+"""Attribution engine: every decision-tree branch (FR-4.1) + end-to-end attribution behavior (FR-4.2/4.3)."""
 import pytest
 
 from pabench.attribution import AttributionThresholds, attribute_episode, decide
@@ -7,7 +7,7 @@ from pabench.schema import Attribution
 TH = AttributionThresholds()
 
 
-# ---------------- 决策树纯函数分支覆盖
+# ---------------- pure-function decision-tree branch coverage
 
 
 def test_rule1_mr_violation_is_model():
@@ -45,7 +45,7 @@ def test_rule4_no_oracle_is_ambiguous():
     assert a is Attribution.AMBIGUOUS and "rule4" in r
 
 
-# ---------------- 端到端: 归因结果应与失败注入方式一致
+# ---------------- end-to-end: attribution results should match how the failure was injected
 
 
 def _attribute_all(backend, episodes, hw):
@@ -61,16 +61,16 @@ def _attribute_all(backend, episodes, hw):
 
 
 def test_sloppy_failures_attributed_to_model(backend, sloppy_calibrated):
-    """失败由模型偏置注入 (校准良好硬件) ⇒ 应主要归因 model。"""
+    """Failures injected by model bias (well-calibrated hardware) ⇒ should be attributed mainly to model."""
     from pabench.runners import CALIBRATED_ARM
     counts = _attribute_all(backend, sloppy_calibrated, CALIBRATED_ARM)
     total = sum(counts.values())
-    assert total >= 10  # sloppy 必须产生足量失败, 否则测试本身无效
+    assert total >= 10  # sloppy must produce enough failures, otherwise the test itself is invalid
     assert counts.get(Attribution.MODEL, 0) / total >= 0.8
 
 
 def test_precise_on_worn_arm_yields_hardware_attributions(backend, precise_worn):
-    """失败由硬件漂移注入 (好模型) ⇒ hardware 归因应占多数。"""
+    """Failures injected by hardware drift (good model) ⇒ hardware attribution should be the majority."""
     from pabench.runners import WORN_ARM
     counts = _attribute_all(backend, precise_worn, WORN_ARM)
     total = sum(counts.values())
@@ -79,7 +79,7 @@ def test_precise_on_worn_arm_yields_hardware_attributions(backend, precise_worn)
 
 
 def test_attribution_written_back_with_versioned_reason(backend, sloppy_calibrated):
-    """NFR-6 可审计: 归因结论须带规则版本与命中规则。"""
+    """NFR-6 auditable: the attribution conclusion must carry the rule version and the rule that fired."""
     failed = [e for e in sloppy_calibrated if not e.outcome.success]
     ep = failed[0]
     attribute_episode(ep, TH)

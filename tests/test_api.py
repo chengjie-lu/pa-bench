@@ -1,7 +1,7 @@
-"""M-FE2 platform API 端到端 (fe-rq.md §8/§9): 发起运行 → 进度 → 结果消费。
+"""M-FE2 platform API end-to-end (fe-rq.md §8/§9): launch run → progress → result consumption.
 
-覆盖 FR-FE-2.1 (seed 透传可复现)、回合筛选/排序/分页、stride 降采样、取消、
-scenes/preview、models/hardware 列表。FakeSim 快, 全程在 TestClient 内同步等待。
+Covers FR-FE-2.1 (seed pass-through reproducibility), episode filter/sort/pagination, stride downsampling, cancel,
+scenes/preview, and the models/hardware lists. FakeSim is fast, so everything waits synchronously inside TestClient.
 """
 import json
 import sys
@@ -20,7 +20,7 @@ from pabench.platform import create_app  # noqa: E402
 
 @pytest.fixture()
 def client(tmp_path):
-    # legacy_out=None: 不导入 out/, 每个用例从空运行集起步
+    # legacy_out=None: do not import out/, each test starts from an empty run set
     app = create_app(runs_dir=tmp_path / "runs", web_dir=None, legacy_out=None)
     return TestClient(app)
 
@@ -32,7 +32,7 @@ def _wait_done(client, run_id, timeout=20.0):
         if p["status"] in ("done", "failed", "cancelled"):
             return p
         time.sleep(0.02)
-    raise AssertionError(f"运行 {run_id} 超时未完成")
+    raise AssertionError(f"run {run_id} timed out before completing")
 
 
 def _start(client, **cfg):
@@ -42,7 +42,7 @@ def _start(client, **cfg):
     return r.json()["run_id"]
 
 
-# ---------------- 元信息端点 ----------------
+# ---------------- metadata endpoints ----------------
 def test_ping(client):
     assert client.get("/api/ping").json()["milestone"] == "M-FE2"
 
@@ -53,7 +53,7 @@ def test_models_and_hardware(client):
     hw = client.get("/api/hardware").json()["hardware"]
     ids = {h["hw_config_id"]: h for h in hw}
     assert "arm-calibrated-2026Q2" in ids and "arm-worn-2023Q1" in ids
-    # 2023Q1 距 2026 已过期标黄, 2026Q2 不过期 (NFR-2)
+    # 2023Q1 is stale by 2026 (flagged yellow), 2026Q2 is not stale (NFR-2)
     assert ids["arm-worn-2023Q1"]["stale"] is True
     assert ids["arm-calibrated-2026Q2"]["stale"] is False
 
@@ -69,16 +69,16 @@ def test_scenes_preview(client):
     assert len(scenes) == 5
     p = scenes[0]["perturbation"]
     assert {"part_dx", "part_dy", "part_dyaw", "lux_factor", "friction"} <= p.keys()
-    assert 0.4 <= p["lux_factor"] <= 0.9  # 滑杆区间透传 (§4.2)
+    assert 0.4 <= p["lux_factor"] <= 0.9  # slider range passed through (§4.2)
 
 
-# ---------------- 运行生命周期 ----------------
+# ---------------- run lifecycle ----------------
 def test_run_lifecycle_and_summary(client):
     rid = _start(client, model_ids=["precise-vla-0.3"], hw_ids=["arm-worn-2023Q1"],
                  seed=3, mutation_episodes=6)
     p = _wait_done(client, rid)
     assert p["status"] == "done"
-    assert p["done"] == p["total"] == 1 + 6 + 3  # nominal + mut + MR
+    assert p["done"] == p["total"] == 1 + 6 + 3  # nominal + mutation + MR
 
     summary = client.get(f"/api/runs/{rid}/summary").json()
     assert len(summary["results"]) == 1
@@ -87,7 +87,7 @@ def test_run_lifecycle_and_summary(client):
     assert r["ci95"][0] <= r["sr"] <= r["ci95"][1]
     assert summary["meta"]["seed"] == 3
 
-    # index = 回合索引 + 预聚合, 列表行不含大数组 (NFR-FE N2)
+    # index = episode index + pre-aggregations; list rows carry no large arrays (NFR-FE N2)
     index = client.get(f"/api/runs/{rid}/index").json()
     assert len(index["episodes"]) == p["total"]
     assert set(index["aggregates"]) == {"radar", "robustness", "sankey", "failure_hist"}
@@ -102,7 +102,7 @@ def test_run_appears_in_list(client):
 
 
 def test_seed_reproducible(client):
-    """FR-FE-2.1: 固定 seed 两次运行 → report 完全一致 (NFR-1 透传)。"""
+    """FR-FE-2.1: two runs with a fixed seed → identical report (NFR-1 pass-through)."""
     cfg = dict(seed=77, mutation_episodes=5)
     rid1 = _start(client, **cfg); _wait_done(client, rid1)
     rid2 = _start(client, **cfg); _wait_done(client, rid2)
@@ -119,33 +119,33 @@ def test_different_seed_differs(client):
     assert json.dumps(s1, sort_keys=True) != json.dumps(s2, sort_keys=True)
 
 
-# ---------------- 回合列表: 筛选 / 排序 / 分页 ----------------
+# ---------------- episode list: filter / sort / pagination ----------------
 def test_episodes_filter_sort_page(client):
     rid = _start(client, seed=7, mutation_episodes=12)
     _wait_done(client, rid)
 
     all_eps = client.get("/api/episodes", params={"run": rid, "size": 500}).json()
     total = all_eps["total"]
-    assert total == 4 * (1 + 12 + 3)  # 默认 2 模型 × 2 硬件 = 4 组合
+    assert total == 4 * (1 + 12 + 3)  # default 2 models × 2 hardware = 4 combos
 
-    # 成功筛选: 子集且全 success
+    # success filter: a subset, all successful
     succ = client.get("/api/episodes", params={"run": rid, "success": "true", "size": 500}).json()
     assert all(e["success"] for e in succ["episodes"])
     fail = client.get("/api/episodes", params={"run": rid, "success": "false", "size": 500}).json()
     assert succ["total"] + fail["total"] == total
 
-    # 模型筛选
+    # model filter
     m = client.get("/api/episodes",
                    params={"run": rid, "model_id": "sloppy-vla-0.1", "size": 500}).json()
     assert all(e["model_id"] == "sloppy-vla-0.1" for e in m["episodes"])
 
-    # 排序: e_track 降序
+    # sort: e_track descending
     s = client.get("/api/episodes", params={"run": rid, "sort": "e_track_steady_rms_mm",
                                             "order": "desc", "size": 500}).json()
     vals = [e["e_track_steady_rms_mm"] for e in s["episodes"]]
     assert vals == sorted(vals, reverse=True)
 
-    # 分页: 两页拼回全集
+    # pagination: two pages reassemble the full set
     p1 = client.get("/api/episodes", params={"run": rid, "page": 1, "size": 10}).json()
     p2 = client.get("/api/episodes", params={"run": rid, "page": 2, "size": 10}).json()
     assert len(p1["episodes"]) == 10 and p1["total"] == total
@@ -170,7 +170,7 @@ def test_episode_detail_stride(client):
     assert len(ds["robot"]["t"]) == (n + 3) // 4
     assert len(ds["model"]["actions"]["cmd_xyz"]) == (n + 3) // 4
     assert ds["_stride"] == 4
-    # phase_spans 索引同步缩放
+    # phase_spans indices scale in sync
     assert ds["robot"]["phase_spans"][0][2] <= len(ds["robot"]["t"])
 
 
@@ -178,26 +178,26 @@ def test_episode_404(client):
     assert client.get("/api/episodes/does-not-exist").status_code == 404
 
 
-# ---------------- 取消 ----------------
+# ---------------- cancel ----------------
 def test_cancel_run(client):
-    # 大预算 + 节流 → 有时间发取消
+    # large budget + throttle → enough time to send a cancel
     rid = _start(client, seed=5, mutation_episodes=60, pace_s=0.03)
     time.sleep(0.3)
     assert client.post(f"/api/runs/{rid}/cancel").json()["cancelling"] is True
     p = _wait_done(client, rid)
     assert p["status"] == "cancelled"
     assert p["done"] < p["total"]
-    # 取消的运行无 summary (产物未落盘)
+    # a cancelled run has no summary (artifacts not persisted)
     assert client.get(f"/api/runs/{rid}/summary").status_code == 409
 
 
-# ---------------- 校验错误 ----------------
+# ---------------- validation errors ----------------
 def test_invalid_config_400(client):
-    # metamorphic 需要 nominal
+    # metamorphic requires nominal
     r = client.post("/api/runs", json={"nominal": False, "mutation_episodes": 4,
                                        "metamorphic": True})
     assert r.status_code == 400
-    # 未注册模型
+    # unregistered model
     r = client.post("/api/runs", json={"model_ids": ["ghost-vla"]})
     assert r.status_code == 400
 
@@ -207,12 +207,12 @@ def test_missing_run_404(client):
     assert client.get("/api/runs/nope/summary").status_code == 404
 
 
-# ---------------- 历史产物导入 ----------------
+# ---------------- historical-artifact import ----------------
 def test_legacy_import(tmp_path):
-    """out/ 产物被注册为已完成运行 (M-FE1 → M-FE2 过渡)。"""
+    """out/ artifacts are registered as a completed run (M-FE1 → M-FE2 transition)."""
     out = Path(__file__).resolve().parent.parent / "out"
     if not (out / "episodes.jsonl").exists():
-        pytest.skip("无 out/ 产物 (先跑 demo.py)")
+        pytest.skip("no out/ artifacts (run demo.py first)")
     app = create_app(runs_dir=tmp_path / "runs", web_dir=None, legacy_out=out)
     c = TestClient(app)
     runs = c.get("/api/runs").json()["runs"]

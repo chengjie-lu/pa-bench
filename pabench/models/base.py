@@ -1,9 +1,9 @@
-"""FR-2.4 标准模型接口 —— 真实现 (接口本身)。
-接真实 VLA 时: 实现一个 VLAModel 子类, 在 infer() 里调远端 gRPC/HTTP 端点即可,
-评测侧其余代码零改动。uncertainty 可选, 缺失时相关指标记 N/A (FR-2.4 / D5)。
+"""FR-2.4 standard model interface — real implementation (the interface itself).
+To wire up a real VLA: implement a VLAModel subclass and call a remote gRPC/HTTP endpoint inside infer();
+the rest of the evaluation side needs zero changes. uncertainty is optional; when absent the related metrics record N/A (FR-2.4 / D5).
 
-纵切简化: infer 一次返回整条指令轨迹 (open-loop action chunk);
-闭环分块推理按同一接口扩展 (chunk 拼接), 列入已知限制。
+Vertical-slice simplification: infer returns the whole command trajectory at once (open-loop action chunk);
+closed-loop chunked inference extends the same interface (chunk concatenation), listed as a known limitation.
 """
 from __future__ import annotations
 
@@ -17,8 +17,9 @@ from ..schema import ActionChunk, Phase, Scene
 
 @dataclass
 class Observation:
-    """喂给模型的观测。真实系统中这里是图像+本体; 假实现中模型自行模拟感知误差,
-    因此把场景真值与光照透传给(假)模型 —— 真模型接入时换成渲染图像。"""
+    """The observation fed to the model. In a real system this would be images + proprioception; in the fake
+    implementation the model simulates its own perception error, so we pass scene ground truth and lighting through to
+    the (fake) model — replace with rendered images when wiring up a real model."""
     scene: Scene
     lux_factor: float
     instruction: str

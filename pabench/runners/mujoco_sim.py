@@ -1,13 +1,14 @@
-"""MuJoCo 物理后端 —— Backend 接口的真实现 (rq.md O-1, M2+)。
+"""MuJoCo physics backend — a real implementation of the Backend interface (rq.md O-1, M2+).
 
-物理建模 (本版边界):
-- 末端执行器 = 4-DOF 工具体 (slide x/y/z + hinge yaw), 位置伺服驱动;
-  跟踪迟滞/超调由真实二阶动力学产生, 不再是解析滤波。
-- 硬件档案 → 伺服刚度/阻尼 + 注入扰动力 (恒力=漂移, 正弦力=抖动, 随机力=噪声)。
-- 抓取/拧紧的接触动力学不在本版范围 (成功判据与 FakeSim 同口径, 便于跨后端对比);
-  接触级保真度列入 future work。
+Physics modeling (boundary of this version):
+- End-effector = 4-DOF tool body (slide x/y/z + hinge yaw), driven by position servos;
+  tracking lag/overshoot is produced by real second-order dynamics, no longer an analytic filter.
+- Hardware profile → servo stiffness/damping + injected disturbance forces (constant force = drift,
+  sinusoidal force = jitter, random force = noise).
+- Contact dynamics of grasping/fastening are out of scope here (the success criterion matches
+  FakeSim for cross-backend comparability); contact-level fidelity is future work.
 
-import 失败时优雅降级: MUJOCO_AVAILABLE=False, 实例化给出明确指引。
+On import failure it degrades gracefully: MUJOCO_AVAILABLE=False, and instantiation gives clear guidance.
 """
 from __future__ import annotations
 
@@ -27,7 +28,7 @@ except ImportError:
 
 _HOME = np.array([0.30, 0.0, 0.30])
 
-# 硬件标定档案 → MuJoCo 伺服/扰动参数 (droop/jitter/noise 单位: N)
+# Hardware calibration profile → MuJoCo servo/disturbance params (droop/jitter/noise units: N)
 MJ_PROFILES = {
     "arm-calibrated-2026Q2": dict(kp=2000.0, kv=80.0, droop=(0.10, -0.06),
                                   jitter_f=0.30, noise_f=0.15),
@@ -37,7 +38,7 @@ MJ_PROFILES = {
                          jitter_f=0.12, noise_f=0.08),
 }
 JITTER_FREQS = (12.0, 27.0)
-PHYS_DT = 0.002  # 物理步长; 100 Hz 控制 → 每控制步 5 个物理子步
+PHYS_DT = 0.002  # physics step; 100 Hz control → 5 physics substeps per control step
 
 
 def _build_xml(kp: float, kv: float) -> str:
@@ -66,8 +67,8 @@ class MujocoBackend(Backend):
     def __init__(self, dt: float = DT):
         if not MUJOCO_AVAILABLE:
             raise RuntimeError(
-                "mujoco 未安装。pip install mujoco 后使用; "
-                "当前环境请用 FakeSimBackend (接口相同)。")
+                "mujoco is not installed. Install it with `pip install mujoco`; "
+                "in the current environment use FakeSimBackend (same interface).")
         self.dt = dt
         self.substeps = int(round(dt / PHYS_DT))
         self.phase_spans, self.n_steps = _phase_spans(dt)
@@ -81,14 +82,14 @@ class MujocoBackend(Backend):
         rng_model = np.random.default_rng(seed)
         obs = Observation(scene=scene,
                           lux_factor=float(scene.perturbation.get("lux_factor", 1.0)),
-                          instruction="从料箱拿起瓶盖, 拧紧到瓶子上",
+                          instruction="pick the cap from the bin and screw it onto the bottle",
                           t_grid=self.t_grid, phase_spans=self.phase_spans)
         chunk = model.infer(obs, rng_model)
         return self._execute(scene, model.model_id, chunk, hw, seed)
 
     def run_oracle(self, scene: Scene, hw: HardwareProfile, seed: int) -> Episode:
         from .fake_sim import FakeSimBackend
-        chunk = FakeSimBackend(self.dt)._plan_oracle(scene)  # 同一专家轨迹规划器
+        chunk = FakeSimBackend(self.dt)._plan_oracle(scene)  # same expert trajectory planner
         return self._execute(scene, "oracle-replay", chunk, hw, seed)
 
     # ------------------------------------------------------------ internals
@@ -113,9 +114,9 @@ class MujocoBackend(Backend):
 
         droop = np.array(prof["droop"])
         for i in range(n):
-            d.ctrl[0:3] = cmd[i] - _HOME          # 位置伺服目标 (关节系)
+            d.ctrl[0:3] = cmd[i] - _HOME          # position-servo target (joint frame)
             d.ctrl[3] = chunk.cmd_yaw[i]
-            # 扰动力: 漂移 + 抖动 + 噪声 (作用于工具体 xy)
+            # disturbance force: drift + jitter + noise (applied to the tool body xy)
             f = droop.copy()
             for k, fr in enumerate(JITTER_FREQS):
                 f += prof["jitter_f"] * np.sin(2 * np.pi * fr * self.t_grid[i] + phases[k])
@@ -126,7 +127,7 @@ class MujocoBackend(Backend):
             actual[i] = _HOME + d.qpos[0:3]
             yaw_actual[i] = d.qpos[3]
 
-        # 成功判据与 wrench/夹爪 —— 与 FakeSim 同口径 (跨后端可比)
+        # success criterion and wrench/gripper — same as FakeSim (cross-backend comparable)
         gap = scene.tolerance_class.gap_m
         part_xy = np.array(scene.part_pose_gt.xyz[:2])
         target_xy = np.array(scene.target_pose_gt.xyz[:2])
@@ -166,7 +167,7 @@ class MujocoBackend(Backend):
             benchmark_version=BENCHMARK_VERSION + "+mujoco", source=Source.SIM,
             scene=scene,
             model=ModelTrace(model_id=model_id,
-                             language_instruction="从料箱拿起瓶盖, 拧紧到瓶子上",
+                             language_instruction="pick the cap from the bin and screw it onto the bottle",
                              chunk=chunk),
             robot=robot, outcome=outcome,
             media={"video_uris": [], "sim_state_log_uri": None},

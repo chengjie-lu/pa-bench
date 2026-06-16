@@ -1,7 +1,8 @@
-"""AGX Dynamics 后端: 确定性 + 硬件区分 + 与解析后端同口径 (agx 缺失/无许可时跳过)。
+"""AGX Dynamics backend: determinism + hardware discrimination + same conventions as the analytic backend (skipped when agx is missing / unlicensed).
 
-AGX 是商用许可产品, CI 与本机通常不可用 → 与 MuJoCo 后端同样用 skipif 跳过物理断言。
-即使 agx 不可用, 也要保证: 接口可发现 (BACKEND_IDS 含 agx)、降级路径给出明确指引。
+AGX is a commercially licensed product; CI and local machines usually can't use it → like the MuJoCo backend,
+its physics assertions are skipped via skipif. Even when agx is unavailable we still guarantee: the interface
+is discoverable (BACKEND_IDS contains agx) and the degradation path gives clear guidance.
 """
 import pytest
 
@@ -10,18 +11,18 @@ from pabench.runners.agx_sim import AGX_AVAILABLE, AgxBackend
 
 
 def test_agx_registered_in_factory():
-    # 后端工厂始终能发现 agx (即插即用契约), 与是否安装无关。
+    # The backend factory always discovers agx (plug-and-play contract), regardless of whether it is installed.
     assert "agx" in BACKEND_IDS
 
 
 def test_agx_graceful_degradation():
     if AGX_AVAILABLE:
-        pytest.skip("agx 可用, 不测降级路径")
+        pytest.skip("agx is available, not testing the degradation path")
     with pytest.raises(RuntimeError, match="AGX Dynamics"):
         AgxBackend()
 
 
-pytestmark_phys = pytest.mark.skipif(not AGX_AVAILABLE, reason="agx 未安装/无许可")
+pytestmark_phys = pytest.mark.skipif(not AGX_AVAILABLE, reason="agx is not installed / unlicensed")
 
 from pabench.models import PreciseVLA  # noqa: E402
 from pabench.runners import CALIBRATED_ARM, WORN_ARM  # noqa: E402

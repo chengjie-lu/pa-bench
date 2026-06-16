@@ -1,5 +1,5 @@
-"""FR-1.3 变质测试 —— 本纵切落地 MR-1 (场景绕世界 z 轴旋转 → 动作应等变)。
-MR-2/3/4 按同一 MetamorphicRelation 接口扩展 (见 rq.md FR-1.3, 列入已知限制)。真实现。
+"""FR-1.3 metamorphic testing — this slice implements MR-1 (rotate the scene about the world z axis → actions should be equivariant).
+MR-2/3/4 extend the same MetamorphicRelation interface (see rq.md FR-1.3, listed as a known limitation). Real implementation.
 """
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from ..schema import Episode, GenerationMethod, Scene
 
 
 def dtw_mean_distance(a: np.ndarray, b: np.ndarray) -> float:
-    """经典 O(N·M) DTW, 返回最优路径代价 / max(N,M) — 即逐步平均偏差 [m]。"""
+    """Classic O(N·M) DTW, returns optimal-path cost / max(N,M) — i.e. step-wise average deviation [m]."""
     a = np.asarray(a, float)
     b = np.asarray(b, float)
     n, m = len(a), len(b)
@@ -24,16 +24,16 @@ def dtw_mean_distance(a: np.ndarray, b: np.ndarray) -> float:
 
 
 class MR1RotationZ:
-    """MR-1: 整个场景绕世界 z 轴旋转 theta ⇒ 模型指令轨迹应近似同旋转 (等变性)。
-    判定: 把后继回合的指令轨迹反旋回源坐标系, 与源回合指令轨迹做 DTW;
-    逐步平均偏差 > threshold_m ⇒ MR 违反 ⇒ 模型鲁棒性缺陷 (归因直接判 model)。
+    """MR-1: rotating the whole scene by theta about the world z axis ⇒ the model's command trajectory should rotate the same way (equivariance).
+    Verdict: rotate the follow-up episode's command trajectory back into the source frame, run DTW against the source episode's command trajectory;
+    step-wise average deviation > threshold_m ⇒ MR violated ⇒ model robustness defect (attribution directly assigns model).
 
-    注意: 等变性只约束场景锚定段 (transfer 起 — 即离开固定 home 之后);
-    approach 段从不随场景旋转的 home 出发, 不参与比较。
+    Note: equivariance only constrains the scene-anchored segment (from transfer onward — i.e. after leaving the fixed home);
+    the approach segment starts from a home that never rotates with the scene, so it does not participate in the comparison.
 
-    距离度量: 两轨迹在同一时间网格上 ⇒ 用时间同步逐点平均距离 (无规整漏洞);
-    DTW 的时间规整会沿路径方向吸收恒定偏置, 弱化非等变检出, 仅留给将来
-    不等长轨迹的场景 (dtw_mean_distance 保留可用)。
+    Distance metric: both trajectories are on the same time grid ⇒ use time-synchronized point-wise average distance (no warping loophole);
+    DTW's time warping would absorb a constant bias along the path direction and weaken non-equivariance detection, so it is reserved for future
+    unequal-length-trajectory scenarios (dtw_mean_distance is kept available).
     """
     mr_id = "MR-1"
 
@@ -57,23 +57,23 @@ class MR1RotationZ:
 
     def check(self, source_ep: Episode, followup_ep: Episode) -> dict:
         from ..schema import Phase
-        i0, _ = source_ep.robot.span(Phase.TRANSFER)  # 场景锚定段起点
+        i0, _ = source_ep.robot.span(Phase.TRANSFER)  # start of the scene-anchored segment
         src = source_ep.model.chunk.cmd_xyz[i0 :: self.dtw_stride]
         fol = followup_ep.model.chunk.cmd_xyz[i0 :: self.dtw_stride].copy()
         c, s = np.cos(-self.theta), np.sin(-self.theta)
         x, y = fol[:, 0].copy(), fol[:, 1].copy()
         fol[:, 0] = c * x - s * y
         fol[:, 1] = s * x + c * y
-        d = float(np.mean(np.linalg.norm(src - fol, axis=1)))  # 时间同步逐点平均距离
+        d = float(np.mean(np.linalg.norm(src - fol, axis=1)))  # time-synchronized point-wise average distance
         return {"mr_id": self.mr_id, "theta": self.theta, "threshold_m": self.threshold_m,
                 "mean_dist_m": d, "violated": d > self.threshold_m}
 
 
 def mr_violation_verdict(checks: list[dict]) -> dict:
-    """协议级 MR 判定 (FR-1.3): 对同一源回合的多个变质后继取中位距离再判。
-    单次比较会被模型自身的随机感知噪声左右 (假阴/假阳), 中位数聚合提高检验功效。"""
+    """Protocol-level MR verdict (FR-1.3): take the median distance over multiple metamorphic follow-ups of the same source episode, then decide.
+    A single comparison is swayed by the model's own random perception noise (false negative/positive); median aggregation improves test power."""
     if not checks:
-        raise ValueError("至少需要 1 个 MR 后继比较")
+        raise ValueError("at least 1 MR follow-up comparison is required")
     med = float(np.median([c["mean_dist_m"] for c in checks]))
     th = checks[0]["threshold_m"]
     return {"mr_id": checks[0]["mr_id"], "median_dist_m": med,

@@ -1,8 +1,8 @@
-"""前端数据适配层 (fe-rq.md §8/§13): 把评测产物变成前端可直接消费的索引与预聚合。
+"""Frontend data-adaptation layer (fe-rq.md §8/§13): turn evaluation artifacts into the index and pre-aggregations the frontend can consume directly.
 
-M-FE1: build_web_data.py 调用本模块, 把 out/ 产物预拆分成 web/data/ 静态文件;
-M-FE2: platform API 调用 export_run_data() 为每个运行落盘同构数据 (NFR-FE N2:
-列表不含大数组; O-F3: 单回合独立 JSON 按需加载)。
+M-FE1: build_web_data.py calls this module to pre-split out/ artifacts into web/data/ static files;
+M-FE2: the platform API calls export_run_data() to persist an isomorphic data pack per run (NFR-FE N2:
+the list carries no large arrays; O-F3: per-episode standalone JSON loaded on demand).
 """
 from __future__ import annotations
 
@@ -14,11 +14,11 @@ from pathlib import Path
 from .schema import Episode
 from .metrics import peak_uncertainty, plan_margin_ratio, tracking_error, wilson_ci
 
-LUX_EDGES = [0.30, 0.44, 0.58, 0.72, 0.86, 1.0001]  # C2 鲁棒性曲线分桶
+LUX_EDGES = [0.30, 0.44, 0.58, 0.72, 0.86, 1.0001]  # C2 robustness-curve buckets
 
 
 def index_record(ep: Episode) -> dict:
-    """回合索引行: 列表列字段 + 预计算指标, 不含大数组 (NFR-FE N2)。"""
+    """Episode index row: list-column fields + precomputed metrics, no large arrays (NFR-FE N2)."""
     pu = peak_uncertainty(ep)
     return {
         "episode_id": ep.episode_id,
@@ -47,7 +47,7 @@ def combo_key(rec):
 
 
 def build_robustness(records):
-    """C2: 每组合 × lux 桶 → SR + Wilson CI。"""
+    """C2: per combo × lux bucket → SR + Wilson CI."""
     out = {}
     for rec in records:
         out.setdefault(combo_key(rec), []).append(rec)
@@ -67,7 +67,7 @@ def build_robustness(records):
 
 
 def build_sankey(records):
-    """C3: 失败 → 阶段 → 归因 → 命中规则。"""
+    """C3: failure → phase → attribution → rule that fired."""
     links = Counter()
     for r in records:
         if r["success"]:
@@ -85,7 +85,7 @@ def build_sankey(records):
 
 
 def build_failure_hist(records):
-    """C5: 首败阶段 × 组合。"""
+    """C5: first-failure phase × combo."""
     phases = ["grasp", "insert"]
     out = {}
     for r in records:
@@ -97,7 +97,7 @@ def build_failure_hist(records):
 
 
 def build_radar(report):
-    """C1: 6 轴, 原始值 + min-max 归一 (基准=本次运行全组合, fe-rq.md C1)。"""
+    """C1: 6 axes, raw values + min-max normalization (baseline = all combos of this run, fe-rq.md C1)."""
     axes = ["Success rate", "Alignment-margin health", "Trajectory smoothness",
             "Tracking health", "Low jitter", "Uncertainty AUROC"]
     combos = []
@@ -108,7 +108,7 @@ def build_radar(report):
             1.0 / (1.0 + math.log10(1.0 + r["jerk_cmd_median"])),
             1.0 / (1.0 + r["e_track_rms_mean_mm"]),
             1.0 / (1.0 + math.log10(1.0 + r["jitter_band_mean"])),
-            r["uncertainty_auroc"],  # None ⇒ 前端标 N/A (FR-FE-5.2)
+            r["uncertainty_auroc"],  # None ⇒ frontend marks N/A (FR-FE-5.2)
         ]
         combos.append({"name": f"{r['model_id']} @ {r['hw_config_id']}", "raw": raw})
     norm_axes = []
@@ -125,7 +125,7 @@ def build_radar(report):
 
 
 def build_index(report: dict, records: list[dict]) -> dict:
-    """index.json: meta + 回合索引 + 图表预聚合 (C1/C2/C3/C5, 聚合在后端做, §8)。"""
+    """index.json: meta + episode index + chart pre-aggregations (C1/C2/C3/C5, aggregated on the backend, §8)."""
     return {
         "meta": report["meta"],
         "episodes": records,
@@ -140,14 +140,14 @@ def build_index(report: dict, records: list[dict]) -> dict:
 
 def export_run_data(dest: Path, results: list[dict], meta: dict,
                     episodes: list[Episode]) -> dict:
-    """把一次运行落盘成前端数据包 (M-FE2 每运行一份, 目录结构同 web/data/):
+    """Persist one run as a frontend data pack (M-FE2 one per run, same directory structure as web/data/):
 
-      dest/report.json          运行级聚合
-      dest/index.json           回合索引 + 预聚合
-      dest/episodes.jsonl       原始产物 (导出/复跑用)
-      dest/episodes/<id>.json   单回合全量 (调试页按需加载)
+      dest/report.json          run-level aggregation
+      dest/index.json           episode index + pre-aggregations
+      dest/episodes.jsonl       raw artifacts (for export / re-run)
+      dest/episodes/<id>.json   full per-episode payload (loaded on demand by the debug page)
 
-    返回 index dict (调用方可直接入内存缓存)。
+    Returns the index dict (the caller can put it straight into an in-memory cache).
     """
     dest = Path(dest)
     ep_dir = dest / "episodes"

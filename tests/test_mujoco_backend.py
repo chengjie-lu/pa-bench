@@ -1,9 +1,9 @@
-"""MuJoCo 物理后端: 确定性 + 硬件区分 + 与解析后端同口径 (mujoco 缺失时跳过)。"""
+"""MuJoCo physics backend: determinism + hardware discrimination + same conventions as the analytic backend (skipped when mujoco is missing)."""
 import pytest
 
 from pabench.runners.mujoco_sim import MUJOCO_AVAILABLE, MujocoBackend
 
-pytestmark = pytest.mark.skipif(not MUJOCO_AVAILABLE, reason="mujoco 未安装")
+pytestmark = pytest.mark.skipif(not MUJOCO_AVAILABLE, reason="mujoco is not installed")
 
 from pabench.models import PreciseVLA  # noqa: E402
 from pabench.runners import CALIBRATED_ARM, WORN_ARM  # noqa: E402

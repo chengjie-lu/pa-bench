@@ -1,14 +1,14 @@
-"""运行管理器: 评测运行的发起 / 进度事件 / 取消 / 落盘 / 历史加载 (fe-rq.md §4.3, §11)。
+"""Run manager: launch / progress events / cancel / persist / load history for evaluation runs (fe-rq.md §4.3, §11).
 
-每个运行一个目录 runs/<run_id>/:
-  run.json          运行元数据 (config + status + 进度), 状态变更即写
-  report.json       运行级聚合 (完成后)
-  index.json        回合索引 + 图表预聚合 (完成后, 结构同 web/data/index.json)
-  episodes.jsonl    原始产物
-  episodes/<id>.json 单回合全量 (调试页按需加载, NFR-FE N2)
+One directory per run, runs/<run_id>/:
+  run.json          run metadata (config + status + progress), written on every status change
+  report.json       run-level aggregation (after completion)
+  index.json        episode index + chart pre-aggregations (after completion, same structure as web/data/index.json)
+  episodes.jsonl    raw artifacts
+  episodes/<id>.json full single episode (loaded on demand by the debug page, NFR-FE N2)
 
-执行在后台线程 (FakeSim 为 CPU 顺序仿真, 单 worker 足够 M1 纵切);
-事件历史保存在内存 + SSE 等待方用 Condition 唤醒 (FR-FE-3.1 ≤2s 反映进度)。
+Execution runs on a background thread (FakeSim is a CPU sequential simulation; a single worker is enough for the M1 slice);
+the event history lives in memory + SSE waiters are woken via a Condition (FR-FE-3.1 reflects progress within ≤2s).
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ def _now_iso() -> str:
 
 
 class Run:
-    """单个评测运行的内存态 (事件历史 + 进度计数 + 取消句柄)。"""
+    """In-memory state of a single evaluation run (event history + progress counters + cancel handle)."""
 
     def __init__(self, run_id: str, cfg: RunConfig, run_dir: Path,
                  status: str = "running", created_at: str | None = None):
@@ -48,7 +48,7 @@ class Run:
         self.cond = threading.Condition()
         self.thread: threading.Thread | None = None
 
-    # ---- 事件流 (SSE 数据源) ----
+    # ---- event stream (SSE data source) ----
     def emit(self, event: dict):
         with self.cond:
             event = dict(event, seq=len(self.events), ts=round(time.time(), 3))
@@ -66,7 +66,7 @@ class Run:
             return self.events[seq:]
 
     def wait_new(self, seq: int, timeout: float) -> bool:
-        """阻塞至有新事件或进入终态; 返回是否有新事件 (SSE 心跳判定用)。"""
+        """Block until there is a new event or a terminal state is reached; returns whether there is a new event (used for SSE heartbeat decisions)."""
         with self.cond:
             if len(self.events) > seq:
                 return True
@@ -82,7 +82,7 @@ class Run:
             self.cond.notify_all()
         self.save_meta()
 
-    # ---- 持久化 ----
+    # ---- persistence ----
     def meta(self) -> dict:
         return {
             "run_id": self.run_id, "status": self.status,
@@ -111,8 +111,8 @@ class Run:
         run.total = m.get("total_episodes", run.total)
         run.combo_progress = m.get("combo_progress", {})
         run.error = m.get("error")
-        if run.status == "running":  # 服务重启时孤儿运行 → failed (线程已不存在)
-            run.status, run.error = "failed", "服务重启导致运行中断 — 请用相同配置重建"
+        if run.status == "running":  # an orphan run after a service restart → failed (the thread no longer exists)
+            run.status, run.error = "failed", "run interrupted by a service restart — please rebuild with the same config"
         return run
 
 
@@ -131,19 +131,19 @@ class RunManager:
         if legacy_out:
             self._import_legacy(Path(legacy_out))
 
-    # ---- 查询 ----
+    # ---- queries ----
     def list_runs(self) -> list[Run]:
         with self._lock:
             return sorted(self._runs.values(), key=lambda r: r.created_at, reverse=True)
 
     def get(self, run_id: str) -> Run | None:
-        if run_id == "latest":  # 'latest' 别名 = 最近完成的运行 (前端适配层用)
+        if run_id == "latest":  # the 'latest' alias = the most recently completed run (used by the frontend adapter)
             done = [r for r in self.list_runs() if r.status == "done"]
             return done[0] if done else None
         return self._runs.get(run_id)
 
     def load_index(self, run: Run) -> dict | None:
-        """运行的 index.json (回合索引 + 预聚合); 完成运行不可变 → 进程内缓存。"""
+        """The run's index.json (episode index + pre-aggregations); a completed run is immutable → in-process cache."""
         cached = self._index_cache.get(run.run_id)
         if cached is not None:
             return cached
@@ -155,14 +155,14 @@ class RunManager:
         return index
 
     def find_episode(self, episode_id: str) -> Path | None:
-        """episode_id → 单回合 JSON 文件 (新运行优先, id 含 seed 全局唯一)。"""
+        """episode_id → single-episode JSON file (newer runs first; the id contains the seed and is globally unique)."""
         for run in self.list_runs():
             p = run.dir / "episodes" / f"{episode_id}.json"
             if p.exists():
                 return p
         return None
 
-    # ---- 发起 / 取消 ----
+    # ---- launch / cancel ----
     def start_run(self, cfg: RunConfig) -> Run:
         with self._lock:
             run_id = (f"run-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
@@ -197,9 +197,9 @@ class RunManager:
             run.emit({"type": "error", "message": err.strip().splitlines()[-1]})
             run.set_status("failed", error=err)
 
-    # ---- 历史产物导入 ----
+    # ---- import historical artifacts ----
     def _import_legacy(self, out_dir: Path):
-        """把 CLI 产物 out/ 注册为一条已完成运行 (M-FE1 → M-FE2 平滑过渡)。"""
+        """Register the CLI artifacts in out/ as one completed run (smooth M-FE1 → M-FE2 transition)."""
         marker = "run-000-legacy-out"
         if marker in self._runs or not (out_dir / "episodes.jsonl").exists():
             return
