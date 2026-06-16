@@ -162,6 +162,19 @@ label.param .val { width: 56px; font-variant-numeric: tabular-nums; }
            overflow-y: auto; box-shadow: 0 1px 3px rgba(0,0,0,.08); font-size: 12px; }
 .ev-list .ev { padding: 4px 0; border-bottom: 1px dashed #eee; }
 
+/* in-browser runtime boot banner */
+#boot-banner { position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+  padding: 9px 16px; font-size: 13px; text-align: center; color: #fff;
+  background: linear-gradient(90deg,#2f63d8,#5e8bf0); box-shadow: 0 1px 4px rgba(0,0,0,.2); }
+#boot-banner.fail { background: #b3261e; }
+#boot-banner.ok { background: #237a36; }
+#boot-banner .spin { display: inline-block; animation: bspin 1s linear infinite; }
+@keyframes bspin { to { transform: rotate(360deg); } }
+
+/* prominent call-to-action on the overview when interactive */
+.cta-row { display: flex; gap: 10px; margin: 6px 0 16px; flex-wrap: wrap; }
+.cta-row button { font-size: 14px; padding: 9px 16px; }
+
 /* custom metrics (FR-5.1 user-registered) */
 .custom-col { background: #f6f3fc; }
 th.custom-col { color: #6b3fb8; }

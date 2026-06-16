@@ -202,7 +202,14 @@ async function renderOverview() {
   }).join("");
 
   const meta = idx.meta;
+  // when interactive (server / in-browser Pyodide), surface the two actions prominently
+  const cta = MODE === "server"
+    ? `<div class="cta-row">
+         <button onclick="location.hash='#/runs/new'">▶ Set up & run an evaluation</button>
+         <button onclick="location.hash='#/metrics'">＋ Register a new metric</button></div>`
+    : "";
   setView(`<h1>Overview <span style="font-weight:400;font-size:13px;color:#888">for readers without a robotics background</span></h1>
+    ${cta}
     <div class="meta">benchmark: ${esc(meta.benchmark_version)} · seed ${meta.seed} ·
       ${meta.total_episodes} episodes · attribution rules ${esc(meta.attr_rules_version)} ·
       🟢≥80% usable / 🟡≥50% at risk / 🔴 not usable</div>
@@ -741,7 +748,7 @@ function registerFormHtml(fields) {
   const fieldChips = f.fields.map((x) =>
     `<code title="${esc(x.description)}" class="field-chip" onclick="insertField('${esc(x.name)}')">${esc(x.name)}</code>`).join(" ");
   const aggOpts = f.aggregations.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join("");
-  return `<details class="reg-form"><summary>＋ Register a metric</summary>
+  return `<details class="reg-form" open><summary>＋ Register a new metric (safe formula over per-episode fields)</summary>
     <div class="reg-grid">
       <label>id <input id="cm-id" placeholder="custom.my_metric"></label>
       <label>level <select id="cm-level"><option>L0</option><option>L1</option><option selected>L2</option><option>L3</option></select></label>
@@ -1239,20 +1246,29 @@ detectMode().then(async () => {
   // On success it serves /api/* via a fetch interceptor, so we flip to server-mode UI and re-render.
   // On failure (offline / no WASM) we silently stay in view-only static mode.
   if (MODE === "static") {
+    const banner = document.getElementById("boot-banner");
+    const showBanner = (html, cls = "") => {
+      if (!banner) return;
+      banner.className = cls; banner.innerHTML = html; banner.style.display = "block";
+    };
     const note = document.getElementById("nav-note");
-    if (note) note.innerHTML = "Static mode · booting in-browser<br>runtime (Pyodide), ~10–20s…";
-    toast("Loading in-browser runtime (Pyodide), ~10–20s — then you can run evaluations & register metrics", "ok");
+    if (note) note.innerHTML = "Static mode · booting in-browser<br>runtime (Pyodide)…";
+    showBanner('<span class="spin">⏳</span> Loading the in-browser runtime (Pyodide ~10–30s) — ' +
+               'then you can <b>run evaluations</b> and <b>register metrics</b>. You can browse results meanwhile.');
     const res = await bootPyodideBackend();
     if (res.ok) {
       MODE = "server"; PY_RUNTIME = true; RUN_CTX = null;
       Object.keys(cache).forEach((k) => delete cache[k]);  // drop static web/data caches
       updateNav();
       router();
-      toast("In-browser runtime ready ✓ — open “Runs” to launch an evaluation, or “Metric registry” to add a metric", "ok");
+      showBanner('✓ In-browser runtime ready — open <b>② Runs → New run</b> to launch an evaluation, ' +
+                 'or <b>④ Metric registry</b> to add a metric.', "ok");
+      setTimeout(() => { if (banner) banner.style.display = "none"; }, 8000);
     } else {
-      if (note) note.innerHTML = `Static mode (view-only).<br>In-browser runtime unavailable:<br>` +
-        `<span style="color:#b3261e">${esc(res.error)}</span>`;
-      toast(`In-browser runtime failed: ${res.error}`, "fail");
+      if (note) note.innerHTML = `Static mode (view-only).<br>Runtime unavailable:<br>` +
+        `<span style="color:#ffd">${esc(res.error)}</span>`;
+      showBanner(`⚠ In-browser runtime unavailable: ${esc(res.error)} — the site stays view-only. ` +
+                 `Try a hard refresh (Cmd/Ctrl+Shift+R) or a different network.`, "fail");
     }
   }
 });
