@@ -207,6 +207,7 @@ async function renderOverview() {
 
 /* ---------------- ② Run results (engineering layer) ---------------- */
 let runSort = { key: "sr", dir: -1 };
+let runCustom = { specs: [], vals: {} };  // user-registered metrics for the current run (server mode)
 async function renderRun(rid) {
   setView(`<h1>Run results</h1><div class="loading">Loading…</div>`);
   let idx, report;
@@ -218,6 +219,7 @@ async function renderRun(rid) {
     return setView(`<h1>Run results</h1><div class="empty-box">No episode data in this run
       ${MODE === "server" ? '<div style="margin-top:8px"><button onclick="location.hash=\'#/runs/new\'">Restart</button></div>' : ""}</div>`);
   const agg = idx.aggregates, meta = idx.meta;
+  runCustom = { specs: idx.custom_metric_specs || [], vals: idx.custom_metrics || {} };
   const jsonHref = MODE === "server" && RUN_CTX
     ? `/api/runs/${encodeURIComponent(RUN_CTX)}/summary` : "data/report.json";
 
@@ -253,13 +255,22 @@ function drawComboTable(results) {
     ["mr1_violated", "MR-1", "equivariance metamorphic test (FR-1.3)"],
     ["attr", "Attribution mix", "failure-responsibility breakdown (FR-4)"],
     ["oracle_replays_used", "Oracle calls", "controlled-experiment cost (FR-4.3)"]];
+  // user-registered metrics → extra columns (server mode); values precomputed per combo by the backend
+  const customCols = runCustom.specs.map((s) => ({
+    id: s.metric_id, label: s.metric_id.replace(/^custom\./, ""),
+    tip: `custom · ${s.agg}(${s.expr})` }));
   const rows = results.slice().sort((a, b) => {
     const k = runSort.key, av = a[k] ?? -1, bv = b[k] ?? -1;
     return (av > bv ? 1 : av < bv ? -1 : 0) * runSort.dir;
   });
+  const customVal = (r, id) => {
+    const v = (runCustom.vals[`${r.model_id} @ ${r.hw_config_id}`] || {})[id];
+    return v === null || v === undefined ? "N/A" : fmt(v, 3);
+  };
   const html = `<table class="grid"><tr>${cols.map(([k, label, tip]) =>
     `<th ${tip ? `title="${esc(tip)}"` : ""} onclick="sortRun('${k}')">${label}
-     ${runSort.key === k ? `<span class="arrow">${runSort.dir > 0 ? "▲" : "▼"}</span>` : ""}</th>`).join("")}</tr>
+     ${runSort.key === k ? `<span class="arrow">${runSort.dir > 0 ? "▲" : "▼"}</span>` : ""}</th>`).join("")}
+    ${customCols.map((c) => `<th title="${esc(c.tip)}" class="custom-col">✦ ${esc(c.label)}</th>`).join("")}</tr>
     ${rows.map((r) => `<tr class="clickable"
         onclick="location.hash='#/episodes${qs(withRun({ model: r.model_id, hw: r.hw_config_id }))}'">
       <td>${lightIcon(r.sr)} ${esc(r.model_id)}<br><span style="color:#888;font-size:11px">${esc(r.hw_config_id)}</span></td>
@@ -270,7 +281,8 @@ function drawComboTable(results) {
       <td>${r.mr1_violated ? "❌ violated" : "✅ passed"} (${fmt(r.mr1_median_dist_mm, 1)}mm)</td>
       <td>${Object.entries(r.attribution_counts).map(([k, v]) =>
             `<span class="badge attr-${k}">${k}:${v}</span>`).join(" ") || "—"}</td>
-      <td>${r.oracle_replays_used}</td></tr>`).join("")}</table>`;
+      <td>${r.oracle_replays_used}</td>
+      ${customCols.map((c) => `<td class="custom-col">${customVal(r, c.id)}</td>`).join("")}</tr>`).join("")}</table>`;
   document.getElementById("combo-table").innerHTML = html;
 }
 window.sortRun = (k) => {
@@ -667,27 +679,111 @@ async function renderEpisode(id) {
 }
 
 /* ---------------- ④ Metric registry ---------------- */
+let metricFields = null;  // {fields, aggregations} cache for the registration form
+
 async function renderMetrics(params) {
   setView(`<h1>Metric registry</h1><div class="loading">Loading…</div>`);
-  let reg;
-  try { reg = await loadRegistry(); } catch (e) { return errorView(e, "router()"); }
+  let reg, custom = [], fields = null;
+  try {
+    reg = await loadRegistry();
+    if (MODE === "server") {
+      [custom, fields] = await Promise.all([
+        fetchJSON("/api/custom-metrics", { fresh: true }).then((d) => d.metrics),
+        metricFields ? Promise.resolve(metricFields)
+          : fetchJSON("/api/metric-fields").then((d) => (metricFields = d))]);
+    }
+  } catch (e) { return errorView(e, "router()"); }
+
   const q = (params.q || "").toLowerCase();
-  const entries = Object.entries(reg).filter(([k, v]) =>
+  const builtin = Object.entries(reg).filter(([k, v]) =>
     !q || k.includes(q) || v.definition.toLowerCase().includes(q) ||
     v.improvement_actions.join(" ").toLowerCase().includes(q));
+  const customMatch = custom.filter((m) =>
+    !q || m.metric_id.toLowerCase().includes(q) || m.definition.toLowerCase().includes(q) ||
+    (m.improvement_actions || []).join(" ").toLowerCase().includes(q));
+
+  const ownerBadge = (o) => `<span class="badge attr-${o === "hardware" ? "hardware" : o === "model" ? "model" : "ambiguous"}">${esc(o)}</span>`;
+  const customRows = customMatch.map((m) => `<tr>
+      <td><code>${esc(m.metric_id)}</code> <span class="badge gen">custom</span></td>
+      <td>${esc(m.level)}</td><td>${ownerBadge(m.owner)}</td>
+      <td>${esc(m.definition)}<div style="color:#888;font-size:11px;margin-top:2px">
+        <code>${esc(m.agg)}(${esc(m.expr)})</code></div></td>
+      <td>${(m.improvement_actions || []).map((a) => `• ${esc(a)}`).join("<br>")}
+        <div style="margin-top:4px"><button class="linkish" onclick="deleteCustomMetric('${esc(m.metric_id)}')">delete</button></div></td>
+    </tr>`).join("");
+  const builtinRows = builtin.map(([k, v]) => `<tr><td><code>${esc(k)}</code></td>
+      <td>${esc(v.level)}</td><td>${ownerBadge(v.owner)}</td>
+      <td>${esc(v.definition)}</td>
+      <td>${v.improvement_actions.map((a) => `• ${esc(a)}`).join("<br>")}</td></tr>`).join("");
+
+  const total = Object.keys(reg).length + custom.length;
+  const shown = builtin.length + customMatch.length;
   setView(`<h1>Metric registry <span style="font-size:12px;color:#888;font-weight:400">
       R-8 machine check: every metric must bind ≥1 improvement action</span></h1>
+    ${MODE === "server" ? registerFormHtml(fields) : `<div class="meta">Registering metrics needs server mode:
+      <code>python serve.py</code></div>`}
     <div class="filters"><label>Search
       <input style="width:240px" value="${esc(params.q || "")}" placeholder="metric id / definition / action"
         onchange="location.hash='#/metrics'+(this.value?('?q='+encodeURIComponent(this.value)):'')"></label>
-      <span class="count">${entries.length} / ${Object.keys(reg).length} items</span></div>
-    ${entries.length === 0 ? '<div class="empty-box">No matching metrics</div>' :
+      <span class="count">${shown} / ${total} items</span></div>
+    ${shown === 0 ? '<div class="empty-box">No matching metrics</div>' :
       `<table class="grid"><tr><th>Metric</th><th>Level</th><th>Owner</th><th>Definition</th><th>Improvement actions (FR-5.1)</th></tr>
-      ${entries.map(([k, v]) => `<tr><td><code>${esc(k)}</code></td>
-        <td>${esc(v.level)}</td><td><span class="badge attr-${v.owner === "hardware" ? "hardware" : v.owner === "model" ? "model" : "ambiguous"}">${esc(v.owner)}</span></td>
-        <td>${esc(v.definition)}</td>
-        <td>${v.improvement_actions.map((a) => `• ${esc(a)}`).join("<br>")}</td></tr>`).join("")}</table>`}`);
+      ${customRows}${builtinRows}</table>`}`);
 }
+
+function registerFormHtml(fields) {
+  const f = fields || { fields: [], aggregations: [] };
+  const fieldChips = f.fields.map((x) =>
+    `<code title="${esc(x.description)}" class="field-chip" onclick="insertField('${esc(x.name)}')">${esc(x.name)}</code>`).join(" ");
+  const aggOpts = f.aggregations.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join("");
+  return `<details class="reg-form"><summary>＋ Register a metric</summary>
+    <div class="reg-grid">
+      <label>id <input id="cm-id" placeholder="custom.my_metric"></label>
+      <label>level <select id="cm-level"><option>L0</option><option>L1</option><option selected>L2</option><option>L3</option></select></label>
+      <label>owner <select id="cm-owner"><option>model</option><option>hardware</option><option>both</option><option>environment</option></select></label>
+      <label>aggregation <select id="cm-agg">${aggOpts}</select></label>
+      <label class="wide">formula (per episode) <input id="cm-expr" placeholder="e.g. e_track_steady_rms_mm > 0.5"></label>
+      <label class="wide">definition <input id="cm-def" placeholder="what this metric means"></label>
+      <label class="wide">improvement actions (one per line) <textarea id="cm-actions" rows="2" placeholder="bind ≥1 action (R-8)"></textarea></label>
+    </div>
+    <div class="field-hints">fields: ${fieldChips} · functions: <code>abs min max</code> · aggregations: <code>${esc(f.aggregations.join(" "))}</code></div>
+    <button onclick="addCustomMetric()">Register metric</button>
+  </details>`;
+}
+
+window.insertField = (name) => {
+  const el = document.getElementById("cm-expr");
+  if (!el) return;
+  const s = el.selectionStart ?? el.value.length;
+  el.value = el.value.slice(0, s) + name + el.value.slice(el.selectionEnd ?? s);
+  el.focus();
+};
+
+window.addCustomMetric = async () => {
+  const val = (id) => (document.getElementById(id)?.value || "").trim();
+  const body = {
+    metric_id: val("cm-id"), level: val("cm-level"), owner: val("cm-owner"),
+    agg: val("cm-agg"), expr: val("cm-expr"), definition: val("cm-def"),
+    improvement_actions: val("cm-actions"),
+  };
+  try {
+    const resp = await fetch("/api/custom-metrics", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body) });
+    if (!resp.ok) throw new Error((await resp.json()).detail || `HTTP ${resp.status}`);
+    toast(`Registered ${body.metric_id}`);
+    router();  // re-render the registry
+  } catch (e) { toast(`Register failed: ${e.message}`, "fail"); }
+};
+
+window.deleteCustomMetric = async (id) => {
+  try {
+    const resp = await fetch(`/api/custom-metrics/${encodeURIComponent(id)}`, { method: "DELETE" });
+    if (!resp.ok) throw new Error((await resp.json()).detail || `HTTP ${resp.status}`);
+    toast(`Deleted ${id}`);
+    router();
+  } catch (e) { toast(`Delete failed: ${e.message}`, "fail"); }
+};
 
 /* ================= M-FE2 server-mode views (fe-rq.md §4.2/§4.3) ================= */
 
@@ -728,7 +824,7 @@ async function renderRuns() {
 /* ---------- ②b New-run wizard (3 steps, no scene editor — that's M-FE3) ---------- */
 const DRAFT_KEY = "pabench-run-draft";
 const WIZ_DEFAULT = () => ({
-  step: 1, model_ids: [], hw_ids: [],
+  step: 1, model_ids: [], hw_ids: [], backend: "fake",
   nominal: true, mutation_on: true, mutation_episodes: 24,
   pos_range_mm: 15, yaw_range_rad: 0.3, lux_min: 0.3, lux_max: 1.0,
   friction_min: 0.6, friction_max: 1.2,
@@ -753,7 +849,7 @@ function wizPerCombo() {
 function wizTotal() { return wizCombos() * wizPerCombo(); }
 function wizBody() {
   return {
-    model_ids: wiz.model_ids, hw_ids: wiz.hw_ids, seed: wiz.seed,
+    model_ids: wiz.model_ids, hw_ids: wiz.hw_ids, backend: wiz.backend || "fake", seed: wiz.seed,
     nominal: wiz.nominal,
     mutation_episodes: wiz.mutation_on ? wiz.mutation_episodes : 0,
     metamorphic: wiz.metamorphic,
@@ -779,12 +875,15 @@ async function renderRunsNew() {
     try { wiz = JSON.parse(localStorage.getItem(DRAFT_KEY)) || WIZ_DEFAULT(); }
     catch { wiz = WIZ_DEFAULT(); }
   }
-  let models, hardware;
+  let models, hardware, backends;
   try {
-    [models, hardware] = await Promise.all([
+    [models, hardware, backends] = await Promise.all([
       fetchJSON("/api/models").then((d) => d.models),
-      fetchJSON("/api/hardware").then((d) => d.hardware)]);
+      fetchJSON("/api/hardware").then((d) => d.hardware),
+      fetchJSON("/api/backends").then((d) => d.backends)]);
   } catch (e) { return errorView(e, "router()"); }
+  // if the saved draft picked a backend that's no longer available, fall back to fake
+  if (!backends.some((b) => b.id === wiz.backend && b.available)) wiz.backend = "fake";
   if (!models.length)
     return setView(`<h1>New run</h1><div class="empty-box">Model list is empty —
       register a model in MODEL_REGISTRY in <code>pabench/pipeline.py</code> (FR-2.4)</div>`);
@@ -810,6 +909,14 @@ async function renderRunsNew() {
         <code>${esc(h.hw_config_id)}</code>
         <span class="badge gen">calibrated ${esc(h.calibrated || "?")}</span>
         ${h.stale ? '<span class="badge warn">⚠ calibration stale (NFR-2)</span>' : ""}
+      </label>`).join("")}
+      <h3>Physics backend (NFR-5 plug-and-play)</h3>
+      ${backends.map((b) => `<label class="pick ${b.available ? "" : "disabled"}" title="${esc(b.note)}">
+        <input type="radio" name="backend" ${b.id === wiz.backend ? "checked" : ""}
+          ${b.available ? "" : "disabled"} onchange="wizSet('backend', '${esc(b.id)}')">
+        <code>${esc(b.id)}</code>
+        ${b.available ? '<span class="badge gen">available</span>' : `<span class="badge attr-ambiguous">unavailable</span>`}
+        <span style="color:#888;font-size:11px">${esc(b.note)}</span>
       </label>`).join("")}
       <h3>Task × tolerance matrix</h3>
       <label class="pick"><input type="checkbox" checked disabled> screw_cap × T1 (cap fastening · tolerance 1.0mm)</label>
@@ -875,6 +982,7 @@ async function renderRunsNew() {
     <h3>Selection summary</h3>
     <div class="sum-row">Models</div>${wiz.model_ids.map((m) => `<code>${esc(m)}</code>`).join(" ") || "<i>none</i>"}
     <div class="sum-row">Hardware</div>${wiz.hw_ids.map((h) => `<code>${esc(h)}</code>`).join(" ") || "<i>none</i>"}
+    <div class="sum-row">Backend</div><code>${esc(wiz.backend || "fake")}</code>
     <div class="sum-row">Strategy</div>${[wiz.nominal && "nominal",
       wiz.mutation_on && `mutation×${wiz.mutation_episodes}`,
       wiz.metamorphic && "MR-1×3"].filter(Boolean).join(" + ") || "<i>none</i>"}

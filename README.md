@@ -131,6 +131,13 @@ pa-bench/
 - **M-FE1 static mode** ✅: overview / run results / episode browser / per-episode debug + C1/C2/C3/C5 charts, reading `web/data/`.
 - **M-FE2 service mode** ✅: FastAPI wrapper + `/runs/new` 3-step wizard (no scene editor) + live SSE progress +
   run list/detail/cancel/rebuild + legacy `out/` import. Two API-launched runs with the same seed produce identical artifacts (FR-FE-2.1).
+  The wizard also picks the **execution backend** (fake / mujoco / agx; unavailable ones are shown disabled).
+  **User-registered metrics** (FR-5.1): the Metric registry page has a registration form where users add a metric as a
+  safe per-episode formula over whitelisted fields (`success`, `plan_margin_ratio`, `e_track_steady_rms_mm`,
+  `peak_uncertainty`, `lux`, `duration_s`) + an aggregation (mean/median/max/min/sum/rate). Formulas are evaluated by an
+  AST-hardened evaluator (no `eval`); R-8 still requires each to bind ≥1 improvement action. Registered metrics persist
+  (`custom_metrics.json`), show in the registry, and appear as extra columns in the run-results combo table — computed
+  on demand so they apply to existing runs too. API: `GET /api/backends`, `GET /api/metric-fields`, `GET/POST/DELETE /api/custom-metrics`.
 - **M-FE3 interactive scenes** ⬜: scene-editor mouse/keyboard interaction (drag pose / adjust lighting), oracle-control button, side-by-side comparison of two runs.
 - **M-FE4 customer-facing** ⬜: PDF report export, `/hardware` hardware-trend page, R-9 non-expert user testing.
 - Degradation clauses still apply: the 3D viewport is a 2D top-down canvas (N5); FakeSim does not render, so the debug-page video area is always a placeholder (O-F2).

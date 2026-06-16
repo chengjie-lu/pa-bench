@@ -18,7 +18,9 @@ from starlette.concurrency import run_in_threadpool
 
 from ..schema import BENCHMARK_VERSION
 from ..pipeline import HW_REGISTRY, MODEL_REGISTRY, RunConfig, build_scenes
-from ..metrics import validate_registry
+from ..runners import BACKEND_IDS
+from ..metrics import (AGGS, METRIC_FIELDS, CustomMetricStore, MetricSpecError,
+                       compute_for_combos, validate_registry)
 from ..metrics.registry import METRIC_REGISTRY
 from .run_manager import RunManager, TERMINAL
 
@@ -63,14 +65,37 @@ def _calib_quarter(hw_config_id: str) -> tuple[str | None, bool]:
     return None, False
 
 
+def _backends_status() -> list[dict]:
+    """Available execution backends + whether their (optional) physics library is importable."""
+    out = [{"id": "fake", "available": True, "note": "analytic stub, always available"}]
+    try:
+        from ..runners.mujoco_sim import MUJOCO_AVAILABLE
+    except Exception:
+        MUJOCO_AVAILABLE = False
+    try:
+        from ..runners.agx_sim import AGX_AVAILABLE
+    except Exception:
+        AGX_AVAILABLE = False
+    out.append({"id": "mujoco", "available": bool(MUJOCO_AVAILABLE),
+                "note": "MuJoCo physics" if MUJOCO_AVAILABLE else "pip install mujoco to enable"})
+    out.append({"id": "agx", "available": bool(AGX_AVAILABLE),
+                "note": "AGX Dynamics physics" if AGX_AVAILABLE else "needs licensed AGX Dynamics"})
+    return [b for b in out if b["id"] in BACKEND_IDS]
+
+
 def create_app(runs_dir: Path | None = None, web_dir: Path | None = None,
-               legacy_out: Path | None = None) -> FastAPI:
+               legacy_out: Path | None = None,
+               custom_metrics_path: Path | None = None) -> FastAPI:
     validate_registry()  # R-8: failing to start is better than shipping broken
-    manager = RunManager(runs_dir or ROOT / "runs",
+    runs_dir = Path(runs_dir or ROOT / "runs")
+    manager = RunManager(runs_dir,
                          legacy_out if legacy_out is not None else ROOT / "out")
+    metric_store = CustomMetricStore(
+        custom_metrics_path or runs_dir.parent / "custom_metrics.json")
     app = FastAPI(title="PA-Bench Platform API", version=BENCHMARK_VERSION,
                   docs_url="/api/docs", openapi_url="/api/openapi.json")
     app.state.manager = manager
+    app.state.metric_store = metric_store
 
     def _run_or_404(run_id: str):
         run = manager.get(run_id)
@@ -109,6 +134,37 @@ def create_app(runs_dir: Path | None = None, web_dir: Path | None = None,
     @app.get("/api/metric-registry")
     def metric_registry():
         return METRIC_REGISTRY
+
+    @app.get("/api/backends")
+    def backends():
+        """Wizard backend selector: which execution backends exist and are usable (NFR-5)."""
+        return {"backends": _backends_status()}
+
+    # ---------------- custom metrics (FR-5.1: users register metrics themselves) ----------------
+    @app.get("/api/metric-fields")
+    def metric_fields():
+        """Building blocks the registration form offers: whitelisted fields + aggregations."""
+        return {"fields": [{"name": k, "description": v} for k, v in METRIC_FIELDS.items()],
+                "aggregations": list(AGGS)}
+
+    @app.get("/api/custom-metrics")
+    def list_custom_metrics():
+        return {"metrics": app.state.metric_store.list()}
+
+    @app.post("/api/custom-metrics", status_code=201)
+    async def add_custom_metric(request: Request):
+        """Register a metric = a safe per-episode formula + aggregation (R-8: needs an action)."""
+        body = await request.json()
+        try:
+            return app.state.metric_store.add(body)
+        except MetricSpecError as e:
+            raise HTTPException(400, str(e))
+
+    @app.delete("/api/custom-metrics/{metric_id}")
+    def delete_custom_metric(metric_id: str):
+        if not app.state.metric_store.delete(metric_id):
+            raise HTTPException(404, f"custom metric not found: {metric_id}")
+        return {"deleted": metric_id}
 
     @app.post("/api/scenes/preview")
     async def scenes_preview(request: Request):
@@ -208,7 +264,12 @@ def create_app(runs_dir: Path | None = None, web_dir: Path | None = None,
         index = manager.load_index(run)
         if index is None:
             raise HTTPException(409, f"run not finished (status={run.status}), no index yet")
-        return dict(index, run_id=run.run_id)
+        # Custom metrics are computed fresh from the index records (they may be added after a run),
+        # so existing runs immediately reflect newly-registered metrics — never baked into the cache.
+        specs = app.state.metric_store.list()
+        custom = compute_for_combos(specs, index["episodes"]) if specs else {}
+        return dict(index, run_id=run.run_id,
+                    custom_metrics=custom, custom_metric_specs=specs)
 
     # ---------------- episodes ----------------
     @app.get("/api/episodes")

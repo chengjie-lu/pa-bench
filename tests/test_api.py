@@ -63,6 +63,73 @@ def test_metric_registry(client):
     assert reg and all(v.get("improvement_actions") for v in reg.values())
 
 
+def test_backends_list(client):
+    backends = client.get("/api/backends").json()["backends"]
+    ids = {b["id"]: b for b in backends}
+    assert "fake" in ids and ids["fake"]["available"] is True  # fake always available
+    assert {"mujoco", "agx"} <= set(ids)  # listed even when their libs are absent
+
+
+def test_metric_fields(client):
+    d = client.get("/api/metric-fields").json()
+    names = {f["name"] for f in d["fields"]}
+    assert {"success", "plan_margin_ratio", "e_track_steady_rms_mm", "lux"} <= names
+    assert "rate" in d["aggregations"] and "mean" in d["aggregations"]
+
+
+# ---------------- custom metrics (FR-5.1: register your own) ----------------
+def test_custom_metric_crud(client):
+    assert client.get("/api/custom-metrics").json()["metrics"] == []
+    spec = {"metric_id": "custom.fail_rate", "level": "L0", "owner": "both",
+            "definition": "failure rate", "expr": "1 - success", "agg": "mean",
+            "improvement_actions": ["drill down to the weakest cell"]}
+    r = client.post("/api/custom-metrics", json=spec)
+    assert r.status_code == 201, r.text
+    listed = client.get("/api/custom-metrics").json()["metrics"]
+    assert [m["metric_id"] for m in listed] == ["custom.fail_rate"]
+    # duplicate id rejected
+    assert client.post("/api/custom-metrics", json=spec).status_code == 400
+    # delete
+    assert client.delete("/api/custom-metrics/custom.fail_rate").status_code == 200
+    assert client.get("/api/custom-metrics").json()["metrics"] == []
+    assert client.delete("/api/custom-metrics/custom.fail_rate").status_code == 404
+
+
+def test_custom_metric_rejects_unsafe_and_r8(client):
+    # unsafe formula
+    assert client.post("/api/custom-metrics", json={
+        "metric_id": "custom.bad", "definition": "d", "expr": "__import__('os')",
+        "agg": "mean", "improvement_actions": ["a"]}).status_code == 400
+    # R-8: no improvement action
+    assert client.post("/api/custom-metrics", json={
+        "metric_id": "custom.bad2", "definition": "d", "expr": "lux",
+        "agg": "mean", "improvement_actions": []}).status_code == 400
+
+
+def test_run_index_includes_custom_metrics(client):
+    client.post("/api/custom-metrics", json={
+        "metric_id": "custom.over_track", "level": "L3", "owner": "hardware",
+        "definition": "fraction over a tracking budget", "expr": "e_track_steady_rms_mm > 0.3",
+        "agg": "rate", "improvement_actions": ["tune controller gains"]})
+    rid = _start(client, model_ids=["precise-vla-0.3"], hw_ids=["arm-worn-2023Q1"],
+                 seed=4, mutation_episodes=6)
+    _wait_done(client, rid)
+    index = client.get(f"/api/runs/{rid}/index").json()
+    assert any(s["metric_id"] == "custom.over_track" for s in index["custom_metric_specs"])
+    combo = "precise-vla-0.3 @ arm-worn-2023Q1"
+    val = index["custom_metrics"][combo]["custom.over_track"]
+    assert 0.0 <= val <= 1.0
+
+
+def test_run_with_backend_selection(client):
+    # the wizard passes backend through; fake is always available and must round-trip
+    rid = _start(client, seed=8, mutation_episodes=3, backend="fake")
+    p = _wait_done(client, rid)
+    assert p["status"] == "done"
+    detail = client.get(f"/api/runs/{rid}").json()
+    assert detail["config"]["backend"] == "fake"
+
+
 def test_scenes_preview(client):
     body = {"seed": 7, "n": 5, "pos_range_m": 0.02, "lux_range": [0.4, 0.9]}
     scenes = client.post("/api/scenes/preview", json=body).json()["scenes"]
